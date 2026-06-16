@@ -93,6 +93,18 @@ func (c *PresidioClient) Analyze(ctx context.Context, text string) ([]AnalyzeRes
 				},
 				SupportedEntity:   "HEALTH_DATA",
 			},
+			{
+				Name:              "SsnRecognizer",
+				SupportedLanguage: "en",
+				Patterns: []PresidioPattern{
+					{
+						Name:  "ssn_pattern",
+						Regex: `\b\d{3}-\d{2}-\d{4}\b`,
+						Score: 1.0,
+					},
+				},
+				SupportedEntity:   "US_SSN",
+			},
 		},
 		Entities: []string{"PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "US_SSN", "HEALTH_DATA"},
 	}

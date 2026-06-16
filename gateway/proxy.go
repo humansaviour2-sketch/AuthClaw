@@ -145,6 +145,8 @@ func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			var redactedPrompts []string
 			redactedPrompts, tokenMap, redactErr = RedactPrompts(r.Context(), tenantID, normalized.Prompts)
 			if redactErr == nil {
+				log.Printf("[DEBUG] ORIGINAL PROMPT: %v", normalized.Prompts)
+				log.Printf("[DEBUG] REDACTED PROMPT: %v", redactedPrompts)
 				newBody, rebuildErr := rebuilder(redactedPrompts)
 				if rebuildErr == nil {
 					r.Body = io.NopCloser(bytes.NewBuffer(newBody))
