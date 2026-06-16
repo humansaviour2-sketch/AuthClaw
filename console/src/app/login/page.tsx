@@ -91,7 +91,7 @@ export default function LoginPage() {
 
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
-              API Key (Password)
+              AuthClaw API Key
             </label>
             <div className="relative">
               <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
@@ -106,6 +106,7 @@ export default function LoginPage() {
                 className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-[#07070a]/80 border border-slate-800 text-slate-200 text-sm placeholder-slate-600 focus:outline-none focus:border-indigo-500/60 focus:ring-1 focus:ring-indigo-500/20 transition-all duration-200"
               />
             </div>
+            <p className="text-[10px] text-slate-500 mt-1.5">Use an AuthClaw API key issued by your administrator.</p>
           </div>
 
           <button

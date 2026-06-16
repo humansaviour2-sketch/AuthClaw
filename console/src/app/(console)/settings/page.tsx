@@ -1,7 +1,21 @@
 import React from "react";
+import { cookies } from "next/headers";
 import { Settings } from "lucide-react";
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  const cookieStore = await cookies();
+  const sessionToken = cookieStore.get("authclaw_session")?.value;
+  let tenantId = "Unknown";
+
+  if (sessionToken) {
+    try {
+      const payload = JSON.parse(sessionToken);
+      tenantId = payload.tenantId || "Unknown";
+    } catch (e) {
+      // Ignore
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -18,10 +32,17 @@ export default function SettingsPage() {
           <Settings className="w-6 h-6" />
         </div>
         <h3 className="text-lg font-semibold text-slate-200">Tenant Settings</h3>
-        <p className="text-slate-500 text-sm max-w-sm mt-2">
+        <p className="text-slate-500 text-sm max-w-sm mt-2 mb-4">
           API Key creation and revocation, user role mapping, and MFA toggle settings will be fully integrated during Phase 12.
         </p>
+        
+        <div className="pt-4 border-t border-slate-800/80 w-full max-w-sm text-center">
+          <p className="text-xs text-slate-500">
+            Tenant ID (UUID): <span className="font-mono text-slate-400 select-all">{tenantId}</span>
+          </p>
+        </div>
       </div>
     </div>
   );
 }
+

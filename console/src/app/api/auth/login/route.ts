@@ -32,6 +32,10 @@ export async function POST(request: Request) {
 
     const { tenant_id: tenantId, scopes, created_by: userId } = res.rows[0];
 
+    // Query tenant name
+    const tenantRes = await query("SELECT name FROM tenants WHERE id = $1", [tenantId]);
+    const tenantName = tenantRes.rowCount && tenantRes.rowCount > 0 ? tenantRes.rows[0].name : "Default Tenant";
+
     // 3. Create server-side session
     const session = sessionStore.createSession({
       apiKey,
@@ -45,6 +49,7 @@ export async function POST(request: Request) {
       sessionId: session.sessionId,
       userId,
       tenantId,
+      tenantName,
       scopes,
       email: email || "admin@authclaw.com",
     };

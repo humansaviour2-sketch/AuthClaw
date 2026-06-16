@@ -52,14 +52,14 @@ def run_sanity_check():
     if r.status_code == 200:
         html = r.text
         # Check for sidebar elements and tenant context
-        has_nav = "Overview" in html and "Gateway" in html and "Policies" in html and "Agent" in html and "Frameworks" in html and "Audit" in html and "Settings" in html
-        has_tenant = "a0eebc99-0000-0000-0000-bb6d6bb9bd11" in html # tenant ID context
+        has_nav = "Overview" in html and "Gateway" in html and "Policies" in html and "Compliance Agent" in html and "Frameworks" in html and "Audit" in html and "Settings" in html
+        has_tenant_name = "Manual Tenant A" in html # tenant name context
         has_user = "admin@authclaw.com" in html
         
-        if has_nav and has_tenant and has_user:
-            print("   [PASS] Overview page loads with active tenant context, user email, and full sidebar navigation shell.")
+        if has_nav and has_tenant_name and has_user:
+            print("   [PASS] Overview page loads with active tenant name context, user email, and full sidebar navigation shell.")
         else:
-            print(f"   [FAIL] Overview page missing metadata. Sidebar navigation items found: {has_nav}, Tenant Context: {has_tenant}, User profile: {has_user}")
+            print(f"   [FAIL] Overview page missing metadata. Sidebar navigation items found: {has_nav}, Tenant Name Context: {has_tenant_name}, User profile: {has_user}")
             sys.exit(1)
     else:
         print(f"   [FAIL] Overview page failed with status {r.status_code}")
@@ -71,7 +71,14 @@ def run_sanity_check():
     for stub in stubs:
         r = session.get(f"{BASE_URL}/{stub}", allow_redirects=False)
         if r.status_code == 200:
-            print(f"   [PASS] Route /{stub} rendered successfully.")
+            if stub == "settings":
+                if "a0eebc99-0000-0000-0000-bb6d6bb9bd11" in r.text:
+                    print("   [PASS] Route /settings rendered successfully and contains raw tenant UUID.")
+                else:
+                    print("   [FAIL] Route /settings rendered but did not contain raw tenant UUID.")
+                    sys.exit(1)
+            else:
+                print(f"   [PASS] Route /{stub} rendered successfully.")
         else:
             print(f"   [FAIL] Route /{stub} failed with status {r.status_code}")
             sys.exit(1)

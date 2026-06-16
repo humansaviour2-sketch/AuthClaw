@@ -13,17 +13,19 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
 
   let userEmail = "admin@authclaw.com";
   let tenantId = "default-tenant";
+  let tenantName = "Default Tenant";
 
   try {
     const payload = JSON.parse(sessionToken);
     userEmail = payload.email || userEmail;
     tenantId = payload.tenantId || tenantId;
+    tenantName = payload.tenantName || tenantName;
   } catch {
     redirect("/login");
   }
 
   return (
-    <ConsoleShell userEmail={userEmail} tenantId={tenantId}>
+    <ConsoleShell userEmail={userEmail} tenantId={tenantId} tenantName={tenantName}>
       {children}
     </ConsoleShell>
   );

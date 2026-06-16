@@ -24,9 +24,10 @@ interface ConsoleShellProps {
   children: React.ReactNode;
   userEmail: string;
   tenantId: string;
+  tenantName: string;
 }
 
-export default function ConsoleShell({ children, userEmail, tenantId }: ConsoleShellProps) {
+export default function ConsoleShell({ children, userEmail, tenantId, tenantName }: ConsoleShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -36,7 +37,7 @@ export default function ConsoleShell({ children, userEmail, tenantId }: ConsoleS
     { name: "Overview", href: "/overview", icon: LayoutDashboard },
     { name: "Gateway", href: "/gateway", icon: Cpu },
     { name: "Policies", href: "/policies", icon: ShieldAlert },
-    { name: "Agent", href: "/agent", icon: Bot },
+    { name: "Compliance Agent", href: "/agent", icon: Bot },
     { name: "Frameworks", href: "/frameworks", icon: Award },
     { name: "Audit", href: "/audit", icon: ScrollText },
     { name: "Settings", href: "/settings", icon: Settings },
@@ -106,7 +107,7 @@ export default function ConsoleShell({ children, userEmail, tenantId }: ConsoleS
               <Building className="w-4 h-4 text-slate-500 flex-shrink-0" />
               <div className="overflow-hidden">
                 <p className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Active Tenant</p>
-                <p className="text-xs font-mono text-slate-300 truncate">{tenantId}</p>
+                <p className="text-xs font-medium text-slate-300 truncate">{tenantName || tenantId}</p>
               </div>
             </div>
           </div>
@@ -155,7 +156,7 @@ export default function ConsoleShell({ children, userEmail, tenantId }: ConsoleS
                   <Building className="w-4 h-4 text-slate-500" />
                   <div className="overflow-hidden">
                     <p className="text-[10px] uppercase font-semibold text-slate-500">Tenant</p>
-                    <p className="text-xs font-mono text-slate-300 truncate">{tenantId}</p>
+                    <p className="text-xs font-medium text-slate-300 truncate">{tenantName || tenantId}</p>
                   </div>
                 </div>
                 <button
