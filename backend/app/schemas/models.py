@@ -82,6 +82,21 @@ class PolicyResponse(BaseModel):
         from_attributes = True
 
 
+class PolicyDetailResponse(BaseModel):
+    """Schema for detailed policy response with yaml"""
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    policy_yaml: str
+    version: int
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+
 class GatewayConfigCreate(BaseModel):
     """Schema for gateway configuration"""
     name: str = Field(..., min_length=1, max_length=255)

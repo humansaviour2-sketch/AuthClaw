@@ -1,0 +1,26 @@
+{
+  "57a9dfba-fdf3-444a-901b-fd3dfa7dd34b": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "57a9dfba-fdf3-444a-901b-fd3dfa7dd34b",
+    "createdAt": 1781613048486
+  },
+  "59291f58-3c7a-4373-9d45-4022dd002d43": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "59291f58-3c7a-4373-9d45-4022dd002d43",
+    "createdAt": 1781613942826
+  }
+}

@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 import { sessionStore } from "./session-store";
 
 const BACKEND_URL = process.env.API_URL || "http://localhost:8000";
@@ -58,5 +59,19 @@ export async function backendFetch(path: string, options: RequestOptions = {}) {
     throw new Error(errorDetail);
   }
 
+  if (response.status === 204) {
+    return null;
+  }
+
   return response.json();
+}
+
+export function handleApiError(error: any) {
+  const isUnauthorized = error.message?.includes("Unauthorized");
+  const status = isUnauthorized ? 401 : 500;
+  const response = NextResponse.json({ error: error.message }, { status });
+  if (isUnauthorized) {
+    response.cookies.delete("authclaw_session");
+  }
+  return response;
 }

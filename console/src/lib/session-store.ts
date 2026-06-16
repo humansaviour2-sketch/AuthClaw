@@ -1,4 +1,9 @@
 import { randomUUID } from "crypto";
+import fs from "fs";
+import path from "path";
+
+// File path outside src to prevent hot-reload loops
+const SESSIONS_FILE = path.join(process.cwd(), "sessions.json");
 
 export interface SessionData {
   sessionId: string;
@@ -10,7 +15,27 @@ export interface SessionData {
 }
 
 class SessionStore {
-  private sessions = new Map<string, SessionData>();
+  private readSessions(): Map<string, SessionData> {
+    try {
+      if (fs.existsSync(SESSIONS_FILE)) {
+        const content = fs.readFileSync(SESSIONS_FILE, "utf-8");
+        const obj = JSON.parse(content);
+        return new Map(Object.entries(obj));
+      }
+    } catch (err) {
+      console.error("Failed to read sessions file:", err);
+    }
+    return new Map();
+  }
+
+  private writeSessions(sessions: Map<string, SessionData>) {
+    try {
+      const obj = Object.fromEntries(sessions.entries());
+      fs.writeFileSync(SESSIONS_FILE, JSON.stringify(obj, null, 2), "utf-8");
+    } catch (err) {
+      console.error("Failed to write sessions file:", err);
+    }
+  }
 
   createSession(data: Omit<SessionData, "sessionId" | "createdAt">): SessionData {
     const sessionId = randomUUID();
@@ -19,18 +44,22 @@ class SessionStore {
       sessionId,
       createdAt: Date.now(),
     };
-    this.sessions.set(sessionId, session);
+    const sessions = this.readSessions();
+    sessions.set(sessionId, session);
+    this.writeSessions(sessions);
     return session;
   }
 
   getSession(sessionId: string): SessionData | undefined {
-    const session = this.sessions.get(sessionId);
+    const sessions = this.readSessions();
+    const session = sessions.get(sessionId);
     if (!session) return undefined;
 
     // Check TTL (e.g. 24 hours)
     const oneDay = 24 * 60 * 60 * 1000;
     if (Date.now() - session.createdAt > oneDay) {
-      this.sessions.delete(sessionId);
+      sessions.delete(sessionId);
+      this.writeSessions(sessions);
       return undefined;
     }
 
@@ -38,17 +67,13 @@ class SessionStore {
   }
 
   deleteSession(sessionId: string): boolean {
-    return this.sessions.delete(sessionId);
+    const sessions = this.readSessions();
+    const deleted = sessions.delete(sessionId);
+    if (deleted) {
+      this.writeSessions(sessions);
+    }
+    return deleted;
   }
 }
 
-// Global singleton to prevent hot reload clearing store in development
-const globalSessionStore = global as unknown as {
-  sessionStoreInstance?: SessionStore;
-};
-
-if (!globalSessionStore.sessionStoreInstance) {
-  globalSessionStore.sessionStoreInstance = new SessionStore();
-}
-
-export const sessionStore = globalSessionStore.sessionStoreInstance;
+export const sessionStore = new SessionStore();

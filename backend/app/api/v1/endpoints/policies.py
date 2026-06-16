@@ -7,7 +7,7 @@ import os
 import redis
 
 from app.db.models import Policy
-from app.schemas.models import PolicyCreate, PolicyResponse
+from app.schemas.models import PolicyCreate, PolicyResponse, PolicyDetailResponse
 from app.core.auth import get_tenant_db, require_scopes
 
 router = APIRouter()
@@ -115,3 +115,26 @@ def upload_policy(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to save policy: {str(e)}"
         )
+
+
+@router.get("", response_model=list[PolicyResponse], dependencies=[require_scopes(["read"])])
+def list_policies(
+    db: Session = Depends(get_tenant_db)
+):
+    """List all policies for the tenant (including inactive/older versions)"""
+    return db.query(Policy).order_by(Policy.version.desc()).all()
+
+
+@router.get("/active", response_model=PolicyDetailResponse, dependencies=[require_scopes(["read"])])
+def get_active_policy(
+    db: Session = Depends(get_tenant_db)
+):
+    """Get the currently active policy for the tenant"""
+    policy = db.query(Policy).filter(Policy.is_active == True).first()
+    if not policy:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active policy found"
+        )
+    return policy
+
