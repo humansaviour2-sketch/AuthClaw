@@ -111,15 +111,15 @@ class TestWorkflowHappyPath:
         # Step through each node manually (not via graph.invoke to control approval)
         state = gather_evidence(state)
         assert state["current_state"] == WorkflowState.ANALYZE_COMPLIANCE.value
-        assert len(state["findings"]) == 2
+        assert len(state["findings"]) == 3
 
         state = analyze_compliance(state)
         assert state["current_state"] == WorkflowState.GENERATE_REMEDIATION_PLAN.value
-        assert state["risk_score"] == 0.5
+        assert state["risk_score"] == 1.0
 
         state = generate_remediation_plan(state)
         assert state["current_state"] == WorkflowState.AWAITING_APPROVAL.value
-        assert len(state["remediation_plan"]) == 1  # 1 non-compliant finding
+        assert len(state["remediation_plan"]) == 3  # 3 non-compliant findings
 
         # First call creates approval, sets PAUSED
         state = awaiting_approval(state)
@@ -134,7 +134,7 @@ class TestWorkflowHappyPath:
 
         state = execute_remediation(state)
         assert state["current_state"] == WorkflowState.VERIFY_RESULTS.value
-        assert state["execution_result"]["actions_executed"] == 1
+        assert state["execution_result"]["actions_executed"] == 3
 
         state = verify_results(state)
         assert state["current_state"] == WorkflowState.COMPLETE.value

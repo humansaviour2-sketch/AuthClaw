@@ -17,6 +17,7 @@ from enum import Enum
 from typing import Any, Optional, TypedDict
 
 from langgraph.graph import StateGraph, END
+from app.orchestrator.worker import EphemeralWorker
 
 logger = logging.getLogger("orchestrator")
 
@@ -86,33 +87,21 @@ def gather_evidence(state: ComplianceState) -> ComplianceState:
     
     framework = state["framework"]
     
-    # Stubbed evidence gathering — in production this would call cloud APIs,
-    # scan configurations, and pull policy documents.
+    worker = EphemeralWorker(
+        tenant_id=state["tenant_id"],
+        workflow_id=state["workflow_id"],
+        request_id=state.get("request_id", ""),
+        emit_audit_fn=state.get("_emit_audit"),
+    )
+    
     findings = []
-    if framework == "HIPAA":
-        findings = [
-            {"control": "164.312(a)(1)", "description": "Access control", "status": "non_compliant",
-             "evidence": "PII data accessible without MFA"},
-            {"control": "164.312(e)(1)", "description": "Transmission security", "status": "compliant",
-             "evidence": "TLS 1.3 enforced on all endpoints"},
-        ]
-    elif framework == "GDPR":
-        findings = [
-            {"control": "Art.25", "description": "Data protection by design", "status": "non_compliant",
-             "evidence": "Redaction not enabled for all PII fields"},
-            {"control": "Art.30", "description": "Records of processing", "status": "compliant",
-             "evidence": "Audit trail active with ClickHouse"},
-        ]
-    elif framework == "SOC2":
-        findings = [
-            {"control": "CC6.1", "description": "Logical access controls", "status": "non_compliant",
-             "evidence": "API keys without expiry found"},
-            {"control": "CC7.2", "description": "System monitoring", "status": "compliant",
-             "evidence": "Kafka audit backbone active"},
-        ]
-    else:
-        findings = [{"control": "UNKNOWN", "description": f"No evidence rules for {framework}",
-                     "status": "unknown", "evidence": "Framework not yet supported"}]
+    # Query each mock cloud connector via the ephemeral worker
+    for provider in ["aws", "azure", "gcp"]:
+        try:
+            prov_findings = worker.run_scan(provider, framework)
+            findings.extend(prov_findings)
+        except Exception as e:
+            logger.error("Failed scan for provider %s: %s", provider, e)
     
     emit = state.get("_emit_audit")
     if emit:
@@ -279,13 +268,56 @@ def execute_remediation(state: ComplianceState) -> ComplianceState:
     
     plan = state.get("remediation_plan", [])
     
-    # Stubbed execution — in production this would trigger ephemeral workers,
-    # Terraform diffs, configuration changes, etc.
+    worker = EphemeralWorker(
+        tenant_id=state["tenant_id"],
+        workflow_id=state["workflow_id"],
+        request_id=state.get("request_id", ""),
+        emit_audit_fn=state.get("_emit_audit"),
+    )
+    
+    details = []
+    actions_successful = 0
+    actions_failed = 0
+    
+    for action in plan:
+        control = action.get("finding_control", "")
+        # Map control to provider
+        provider = None
+        control_lower = control.lower()
+        if "aws" in control_lower or "164.312(a)" in control_lower or "art.25" in control_lower:
+            provider = "aws"
+        elif "azure" in control_lower or "164.312(e)" in control_lower or "art.32" in control_lower:
+            provider = "azure"
+        elif "gcp" in control_lower or "164.312(d)" in control_lower or "art.30" in control_lower:
+            provider = "gcp"
+        
+        if provider:
+            try:
+                res = worker.run_remediation(provider, control)
+                details.append(res)
+                actions_successful += 1
+            except Exception as e:
+                details.append({
+                    "connector": provider.upper(),
+                    "control": control,
+                    "status": "failed",
+                    "details": str(e)
+                })
+                actions_failed += 1
+        else:
+            details.append({
+                "connector": "unknown",
+                "control": control,
+                "status": "failed",
+                "details": f"Unknown provider for control {control}"
+            })
+            actions_failed += 1
+            
     result = {
         "actions_executed": len(plan),
-        "actions_successful": len(plan),
-        "actions_failed": 0,
-        "details": [{"action": p["action"], "result": "applied"} for p in plan],
+        "actions_successful": actions_successful,
+        "actions_failed": actions_failed,
+        "details": details,
     }
     
     emit = state.get("_emit_audit")
