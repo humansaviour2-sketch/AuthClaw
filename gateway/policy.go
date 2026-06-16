@@ -1,0 +1,286 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"regexp"
+	"sync"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+	"gopkg.in/yaml.v3"
+)
+
+// Redis connection client
+var RedisClient *redis.Client
+
+func InitRedis() {
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		redisURL = "localhost:6379"
+	}
+	// Connect to Redis
+	RedisClient = redis.NewClient(&redis.Options{
+		Addr: redisURL,
+	})
+}
+
+// Policy definitions
+type ModelRules struct {
+	Whitelist []string `yaml:"whitelist" json:"whitelist"`
+	Blacklist []string `yaml:"blacklist" json:"blacklist"`
+}
+
+type RegexRule struct {
+	Pattern string `yaml:"pattern" json:"pattern"`
+	Reason  string `yaml:"reason" json:"reason"`
+}
+
+type TopicRule struct {
+	Topic         string   `yaml:"topic" json:"topic"`
+	AllowedModels []string `yaml:"allowed_models" json:"allowed_models"`
+	Reason        string   `yaml:"reason" json:"reason"`
+}
+
+type RateLimits struct {
+	RequestsPerMinute int `yaml:"requests_per_minute" json:"requests_per_minute"`
+}
+
+type PolicyConfig struct {
+	ModelRules ModelRules  `yaml:"model_rules" json:"model_rules"`
+	RegexRules []RegexRule `yaml:"regex_rules" json:"regex_rules"`
+	TopicRules []TopicRule `yaml:"topic_rules" json:"topic_rules"`
+	RateLimits RateLimits  `yaml:"rate_limits" json:"rate_limits"`
+}
+
+// Thread-safe in-memory cache with TTL
+type CachedPolicy struct {
+	Policy    *PolicyConfig
+	PolicyID  string
+	ExpiredAt time.Time
+}
+
+var (
+	policyCache   = make(map[string]CachedPolicy)
+	policyCacheMu sync.RWMutex
+)
+
+func GetCachedPolicy(tenantID string) (*PolicyConfig, string, bool) {
+	policyCacheMu.RLock()
+	defer policyCacheMu.RUnlock()
+
+	cached, exists := policyCache[tenantID]
+	if !exists || time.Now().After(cached.ExpiredAt) {
+		return nil, "", false
+	}
+	return cached.Policy, cached.PolicyID, true
+}
+
+func SetCachedPolicy(tenantID string, policy *PolicyConfig, policyID string, ttl time.Duration) {
+	policyCacheMu.Lock()
+	defer policyCacheMu.Unlock()
+
+	policyCache[tenantID] = CachedPolicy{
+		Policy:    policy,
+		PolicyID:  policyID,
+		ExpiredAt: time.Now().Add(ttl),
+	}
+}
+
+func InvalidatePolicyCache(tenantID string) {
+	policyCacheMu.Lock()
+	defer policyCacheMu.Unlock()
+	delete(policyCache, tenantID)
+}
+
+// ValidatePolicyYAML parses YAML and compiles regexes to reject malformed policies
+func ValidatePolicyYAML(yamlStr string) (*PolicyConfig, error) {
+	var config PolicyConfig
+	if err := yaml.Unmarshal([]byte(yamlStr), &config); err != nil {
+		return nil, fmt.Errorf("invalid YAML syntax: %w", err)
+	}
+
+	for _, rule := range config.RegexRules {
+		if _, err := regexp.Compile(rule.Pattern); err != nil {
+			return nil, fmt.Errorf("invalid regex pattern '%s': %w", rule.Pattern, err)
+		}
+	}
+
+	return &config, nil
+}
+
+// LoadPolicyWithCache handles loading from cache, fallback to Postgres under RLS
+func LoadPolicyWithCache(ctx context.Context, tenantID string) (*PolicyConfig, string, error) {
+	if tenantID == "" {
+		return nil, "", nil
+	}
+
+	// 1. Check cache
+	if config, policyID, ok := GetCachedPolicy(tenantID); ok {
+		return config, policyID, nil
+	}
+
+	// 2. Query Postgres under Tenant RLS context
+	var policyID string
+	var policyYAML string
+
+	err := RunInTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx,
+			"SELECT id, policy_yaml FROM policies WHERE tenant_id = $1 AND is_active = true ORDER BY version DESC LIMIT 1",
+			tenantID,
+		).Scan(&policyID, &policyYAML)
+	})
+
+	if err == sql.ErrNoRows {
+		// Cache negative lookup (empty policy) for 30 seconds
+		SetCachedPolicy(tenantID, nil, "", 30*time.Second)
+		return nil, "", nil
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to fetch policy from database: %w", err)
+	}
+
+	// 3. Parse and validate YAML
+	config, err := ValidatePolicyYAML(policyYAML)
+	if err != nil {
+		return nil, "", fmt.Errorf("policy validation failed: %w", err)
+	}
+
+	// 4. Update Cache
+	SetCachedPolicy(tenantID, config, policyID, 30*time.Second)
+
+	return config, policyID, nil
+}
+
+// CheckRateLimit implements sliding/fixed window rate limit per tenant + route
+func CheckRateLimit(ctx context.Context, tenantID, route string, limit int) (bool, error) {
+	if RedisClient == nil {
+		InitRedis()
+	}
+	if limit <= 0 {
+		return false, nil
+	}
+
+	now := time.Now().Format("200601021504")
+	key := fmt.Sprintf("rate_limit:%s:%s:%s", tenantID, route, now)
+
+	pipe := RedisClient.Pipeline()
+	incr := pipe.Incr(ctx, key)
+	pipe.Expire(ctx, key, 60*time.Second)
+
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	count := incr.Val()
+	if count > int64(limit) {
+		return true, nil
+	}
+	return false, nil
+}
+
+// OPA JSON Request / Response payloads
+type OPAPayload struct {
+	Input struct {
+		TenantID          string        `json:"tenant_id"`
+		Model             string        `json:"model"`
+		Prompts           []string      `json:"prompts"`
+		Topics            []string      `json:"topics"`
+		RateLimitExceeded bool          `json:"rate_limit_exceeded"`
+		Policy            *PolicyConfig `json:"policy,omitempty"`
+	} `json:"input"`
+}
+
+type OPAResponse struct {
+	Result struct {
+		Allow  bool   `json:"allow"`
+		Reason string `json:"reason"`
+	} `json:"result"`
+}
+
+// EvaluatePolicy evaluates rules against OPA. Uses strict DEFAULT-DENY on failure.
+func EvaluatePolicy(ctx context.Context, tenantID, model, route string, prompts []string, topics []string) (bool, string, string, error) {
+	if tenantID == "" {
+		return true, "Allowed (no tenant context)", "", nil
+	}
+
+	// Default-deny values on any failure
+	defaultDenyReason := "Request blocked: policy evaluation failure (default-deny)"
+
+	// 1. Load Policy (caches results, enforces RLS)
+	config, policyID, err := LoadPolicyWithCache(ctx, tenantID)
+	if err != nil {
+		log.Printf("[POLICY-ERROR] LoadPolicy failed for tenant %s: %v", tenantID, err)
+		return false, "Request blocked: policy loading or parsing error", "", err
+	}
+
+	// 2. Check tenant + route rate limiting in Redis
+	rateLimitExceeded := false
+	if config != nil && config.RateLimits.RequestsPerMinute > 0 {
+		var limitErr error
+		rateLimitExceeded, limitErr = CheckRateLimit(ctx, tenantID, route, config.RateLimits.RequestsPerMinute)
+		if limitErr != nil {
+			log.Printf("[POLICY-ERROR] Rate limiting check failed for tenant %s: %v", tenantID, limitErr)
+			return false, "Request blocked: rate limiting check failure", policyID, limitErr
+		}
+	}
+
+	// 3. Build OPA input payload
+	var payload OPAPayload
+	payload.Input.TenantID = tenantID
+	payload.Input.Model = model
+	payload.Input.Prompts = prompts
+	payload.Input.Topics = topics
+	payload.Input.RateLimitExceeded = rateLimitExceeded
+	payload.Input.Policy = config
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("[POLICY-ERROR] Marshal OPA payload failed: %v", err)
+		return false, defaultDenyReason, policyID, err
+	}
+
+	// 4. Query OPA REST API
+	opaURL := os.Getenv("OPA_URL")
+	if opaURL == "" {
+		opaURL = "http://localhost:8181"
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", opaURL+"/v1/data/authclaw", bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		log.Printf("[POLICY-ERROR] Create OPA request failed: %v", err)
+		return false, defaultDenyReason, policyID, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// Use short timeout for OPA requests to avoid hanging
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[POLICY-ERROR] OPA query failed (service unavailable): %v", err)
+		return false, "Request blocked: policy evaluation engine unavailable", policyID, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		log.Printf("[POLICY-ERROR] OPA returned status %d: %s", resp.StatusCode, string(body))
+		return false, defaultDenyReason, policyID, fmt.Errorf("OPA status error: %d", resp.StatusCode)
+	}
+
+	var opaResp OPAResponse
+	if err := json.NewDecoder(resp.Body).Decode(&opaResp); err != nil {
+		log.Printf("[POLICY-ERROR] Decode OPA response failed: %v", err)
+		return false, defaultDenyReason, policyID, err
+	}
+
+	return opaResp.Result.Allow, opaResp.Result.Reason, policyID, nil
+}

@@ -1,0 +1,661 @@
+package main
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"sort"
+	"strings"
+	"time"
+)
+
+// Context keys
+type contextKeyType string
+const RequestTokenMapKey contextKeyType = "request_token_map"
+
+// Presidio structures
+type PresidioClient struct {
+	BaseURL string
+}
+
+type PresidioPattern struct {
+	Name  string  `json:"name"`
+	Regex string  `json:"regex"`
+	Score float64 `json:"score"`
+}
+
+type PresidioRecognizer struct {
+	Name              string            `json:"name"`
+	SupportedLanguage string            `json:"supported_language"`
+	Patterns          []PresidioPattern `json:"patterns"`
+	SupportedEntity   string            `json:"supported_entity"`
+}
+
+type AnalyzeRequest struct {
+	Text             string               `json:"text"`
+	Language         string               `json:"language"`
+	AdHocRecognizers []PresidioRecognizer `json:"ad_hoc_recognizers,omitempty"`
+	Entities         []string             `json:"entities,omitempty"`
+}
+
+type AnalyzeResult struct {
+	Start      int     `json:"start"`
+	End        int     `json:"end"`
+	EntityType string  `json:"entity_type"`
+	Score      float64 `json:"score"`
+}
+
+func NewPresidioClient() *PresidioClient {
+	url := os.Getenv("PRESIDIO_URL")
+	if url == "" {
+		url = "http://localhost:3000"
+	}
+	return &PresidioClient{BaseURL: url}
+}
+
+var presidioClientHTTP = &http.Client{
+	Transport: &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 100,
+		IdleConnTimeout:     90 * time.Second,
+	},
+	Timeout: 10 * time.Second,
+}
+
+func (c *PresidioClient) Analyze(ctx context.Context, text string) ([]AnalyzeResult, error) {
+	reqBody := AnalyzeRequest{
+		Text:     text,
+		Language: "en",
+		AdHocRecognizers: []PresidioRecognizer{
+			{
+				Name:              "HealthDataRecognizer",
+				SupportedLanguage: "en",
+				Patterns: []PresidioPattern{
+					{
+						Name:  "health_keywords",
+						Regex: `(?i)\b(patient|diagnosed|treatment|prescription|symptoms|medical|disease|hospital|doctor|clinic)\b`,
+						Score: 0.8,
+					},
+				},
+				SupportedEntity:   "HEALTH_DATA",
+			},
+		},
+		Entities: []string{"PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "US_SSN", "HEALTH_DATA"},
+	}
+
+	jsonBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/analyze", bytes.NewBuffer(jsonBytes))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := presidioClientHTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("presidio returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var results []AnalyzeResult
+	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+// Encryption Helpers (AES-256 CBC Deterministic)
+var encryptionKey []byte
+
+func initEncryptionKey() {
+	keyStr := os.Getenv("ENCRYPTION_KEY")
+	if keyStr == "" {
+		keyStr = "authclaw-default-32-byte-key-12"
+	}
+	if len(keyStr) > 32 {
+		encryptionKey = []byte(keyStr[:32])
+	} else if len(keyStr) < 32 {
+		k := make([]byte, 32)
+		copy(k, keyStr)
+		encryptionKey = k
+	} else {
+		encryptionKey = []byte(keyStr)
+	}
+}
+
+func pkcs7Pad(data []byte, blockSize int) []byte {
+	padding := blockSize - (len(data) % blockSize)
+	padText := bytes.Repeat([]byte{byte(padding)}, padding)
+	return append(data, padText...)
+}
+
+func pkcs7Unpad(data []byte) ([]byte, error) {
+	length := len(data)
+	if length == 0 {
+		return nil, fmt.Errorf("empty data")
+	}
+	padding := int(data[length-1])
+	if padding < 1 || padding > 16 {
+		return nil, fmt.Errorf("invalid padding")
+	}
+	for i := length - padding; i < length; i++ {
+		if int(data[i]) != padding {
+			return nil, fmt.Errorf("invalid padding content")
+		}
+	}
+	return data[:length-padding], nil
+}
+
+func EncryptDeterministic(plaintext string) (string, error) {
+	if encryptionKey == nil {
+		initEncryptionKey()
+	}
+	block, err := aes.NewCipher(encryptionKey)
+	if err != nil {
+		return "", err
+	}
+	padded := pkcs7Pad([]byte(plaintext), aes.BlockSize)
+	
+	h := sha256.New()
+	h.Write([]byte(plaintext))
+	h.Write(encryptionKey)
+	iv := h.Sum(nil)[:aes.BlockSize]
+
+	ciphertext := make([]byte, len(padded))
+	mode := cipher.NewCBCEncrypter(block, iv)
+	mode.CryptBlocks(ciphertext, padded)
+
+	combined := append(iv, ciphertext...)
+	return base64.StdEncoding.EncodeToString(combined), nil
+}
+
+func DecryptDeterministic(ciphertextStr string) (string, error) {
+	if encryptionKey == nil {
+		initEncryptionKey()
+	}
+	data, err := base64.StdEncoding.DecodeString(ciphertextStr)
+	if err != nil {
+		return "", err
+	}
+	if len(data) < aes.BlockSize {
+		return "", fmt.Errorf("ciphertext too short")
+	}
+	iv := data[:aes.BlockSize]
+	ciphertext := data[aes.BlockSize:]
+
+	block, err := aes.NewCipher(encryptionKey)
+	if err != nil {
+		return "", err
+	}
+
+	if len(ciphertext)%aes.BlockSize != 0 {
+		return "", fmt.Errorf("ciphertext block size invalid")
+	}
+
+	decrypted := make([]byte, len(ciphertext))
+	mode := cipher.NewCBCDecrypter(block, iv)
+	mode.CryptBlocks(decrypted, ciphertext)
+
+	unpadded, err := pkcs7Unpad(decrypted)
+	if err != nil {
+		return "", err
+	}
+
+	return string(unpadded), nil
+}
+
+// DB Tenant Context Execution Helper
+func RunInTenantTx(ctx context.Context, tenantID string, fn func(*sql.Tx) error) error {
+	tx, err := DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx, "SELECT set_config('app.current_tenant_id', $1, true)", tenantID)
+	if err != nil {
+		return err
+	}
+
+	if err := fn(tx); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// Tokenization Mappings Store & Helpers
+func hashToken(token string) string {
+	h := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(h[:])
+}
+
+func cryptoRandInt(max int) int {
+	var n uint32
+	binary.Read(rand.Reader, binary.BigEndian, &n)
+	return int(n % uint32(max))
+}
+
+func generateShortUUID() string {
+	b := make([]byte, 4)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+func getSyntheticBase(entityType string) string {
+	switch entityType {
+	case "PERSON":
+		names := []string{"Alice Smith", "Bob Jones", "Charlie Brown", "Diana Prince", "Evan Wright", "Fiona Gallagher", "George Clark", "Hannah Abbott"}
+		return names[cryptoRandInt(len(names))]
+	case "EMAIL_ADDRESS":
+		domains := []string{"example.org", "testmail.net", "dummycorp.com"}
+		return fmt.Sprintf("user.%d@%s", cryptoRandInt(1000), domains[cryptoRandInt(len(domains))])
+	case "PHONE_NUMBER":
+		return fmt.Sprintf("555-01%02d", cryptoRandInt(100))
+	case "US_SSN":
+		return fmt.Sprintf("%03d-%02d-%04d", cryptoRandInt(1000), cryptoRandInt(100), cryptoRandInt(10000))
+	case "HEALTH_DATA":
+		conditions := []string{"mild condition", "routine treatment", "general symptoms", "medical issue"}
+		return conditions[cryptoRandInt(len(conditions))]
+	default:
+		return "synthetic-placeholder"
+	}
+}
+
+func isTokenValueExists(ctx context.Context, tx *sql.Tx, tenantID, tokenValue string) (bool, error) {
+	var exists bool
+	err := tx.QueryRowContext(ctx,
+		"SELECT EXISTS(SELECT 1 FROM redaction_tokens WHERE tenant_id = $1 AND token_value = $2)",
+		tenantID, tokenValue,
+	).Scan(&exists)
+	return exists, err
+}
+
+func GenerateTokenValue(ctx context.Context, tx *sql.Tx, tenantID, originalValue, entityType, strategy string) (string, error) {
+	switch strategy {
+	case "mask":
+		uuidPart := generateShortUUID()
+		return fmt.Sprintf("[REDACTED_%s_%s]", entityType, uuidPart), nil
+
+	case "hash":
+		salt := "authclaw_salt_2026"
+		h := sha256.New()
+		h.Write([]byte(originalValue + salt))
+		hashPart := hex.EncodeToString(h.Sum(nil))[:12]
+		return fmt.Sprintf("[HASH_%s_%s]", entityType, hashPart), nil
+
+	case "synthetic":
+		baseVal := getSyntheticBase(entityType)
+		tokenVal := baseVal
+		exists, err := isTokenValueExists(ctx, tx, tenantID, tokenVal)
+		if err != nil {
+			return "", err
+		}
+		counter := 1
+		for exists {
+			tokenVal = fmt.Sprintf("%s (%d)", baseVal, counter)
+			exists, err = isTokenValueExists(ctx, tx, tenantID, tokenVal)
+			if err != nil {
+				return "", err
+			}
+			counter++
+		}
+		return tokenVal, nil
+
+	default:
+		return "[REDACTED]", nil
+	}
+}
+
+func GetOrCreateRedactionToken(ctx context.Context, tenantID, originalValue, entityType, strategy string) (string, error) {
+	encVal, err := EncryptDeterministic(originalValue)
+	if err != nil {
+		return "", err
+	}
+
+	var tokenVal string
+
+	err = RunInTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+		err := tx.QueryRowContext(ctx,
+			"SELECT token_value FROM redaction_tokens WHERE tenant_id = $1 AND original_value = $2 AND strategy = $3 LIMIT 1",
+			tenantID, encVal, strategy,
+		).Scan(&tokenVal)
+
+		if err == nil {
+			return nil
+		}
+		if err != sql.ErrNoRows {
+			return err
+		}
+
+		tokenVal, err = GenerateTokenValue(ctx, tx, tenantID, originalValue, entityType, strategy)
+		if err != nil {
+			return err
+		}
+
+		tokenHash := hashToken(tokenVal)
+
+		_, err = tx.ExecContext(ctx,
+			"INSERT INTO redaction_tokens (id, tenant_id, original_value, token_hash, token_value, strategy, created_at) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW())",
+			tenantID, encVal, tokenHash, tokenVal, strategy,
+		)
+		return err
+	})
+
+	if err != nil {
+		return "", err
+	}
+	return tokenVal, nil
+}
+
+func GetRedactionStrategy(ctx context.Context, tenantID string) string {
+	var strategy string
+	err := RunInTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx,
+			"SELECT redaction_strategy FROM gateway_configs WHERE tenant_id = $1 AND is_active = true LIMIT 1",
+			tenantID,
+		).Scan(&strategy)
+	})
+	if err != nil || strategy == "" {
+		return "mask"
+	}
+	return strategy
+}
+
+// RedactPrompts runs Presidio Analyzer and tokenizes original prompts
+func RedactPrompts(ctx context.Context, tenantID string, prompts []string) ([]string, map[string]string, error) {
+	presidio := NewPresidioClient()
+	strategy := GetRedactionStrategy(ctx, tenantID)
+	tokenMap := make(map[string]string)
+	redactedPrompts := make([]string, len(prompts))
+
+	for i, prompt := range prompts {
+		results, err := presidio.Analyze(ctx, prompt)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// Sort results descending by start index to prevent offset issues during replacements
+		sort.Slice(results, func(i, j int) bool {
+			return results[i].Start > results[j].Start
+		})
+
+		runes := []rune(prompt)
+		for _, entity := range results {
+			if entity.Start < 0 || entity.End > len(runes) || entity.Start >= entity.End {
+				continue
+			}
+			originalVal := string(runes[entity.Start:entity.End])
+			tokenVal, err := GetOrCreateRedactionToken(ctx, tenantID, originalVal, entity.EntityType, strategy)
+			if err != nil {
+				return nil, nil, err
+			}
+			tokenMap[tokenVal] = originalVal
+			
+			// Replace text segment
+			runes = append(runes[:entity.Start], append([]rune(tokenVal), runes[entity.End:]...)...)
+		}
+		redactedPrompts[i] = string(runes)
+	}
+
+	return redactedPrompts, tokenMap, nil
+}
+
+// Static Reversal
+func ReverseStaticResponse(body []byte, tokenMap map[string]string) []byte {
+	bodyStr := string(body)
+	for token, original := range tokenMap {
+		bodyStr = strings.ReplaceAll(bodyStr, token, original)
+	}
+	return []byte(bodyStr)
+}
+
+// Streaming Reversal
+type StreamReverser struct {
+	tokenMap map[string]string
+	buffer   string
+}
+
+func NewStreamReverser(tokenMap map[string]string) *StreamReverser {
+	return &StreamReverser{tokenMap: tokenMap}
+}
+
+func (sr *StreamReverser) ProcessChunk(chunk string) string {
+	sr.buffer += chunk
+
+	for token, original := range sr.tokenMap {
+		sr.buffer = strings.ReplaceAll(sr.buffer, token, original)
+	}
+
+	longestPrefixLen := 0
+	for token := range sr.tokenMap {
+		for i := 1; i < len(token); i++ {
+			prefix := token[:i]
+			if strings.HasSuffix(sr.buffer, prefix) {
+				if i > longestPrefixLen {
+					longestPrefixLen = i
+				}
+			}
+		}
+	}
+
+	safeLen := len(sr.buffer) - longestPrefixLen
+	if safeLen <= 0 {
+		return ""
+	}
+
+	output := sr.buffer[:safeLen]
+	sr.buffer = sr.buffer[safeLen:]
+	return output
+}
+
+func (sr *StreamReverser) Flush() string {
+	out := sr.buffer
+	sr.buffer = ""
+	return out
+}
+
+type StreamingReversalReader struct {
+	originalBody io.ReadCloser
+	scanner      *bufio.Scanner
+	reverser     *StreamReverser
+	provider     string
+	outBuffer    bytes.Buffer
+}
+
+func NewStreamingReversalReader(originalBody io.ReadCloser, tokenMap map[string]string, provider string) *StreamingReversalReader {
+	return &StreamingReversalReader{
+		originalBody: originalBody,
+		scanner:      bufio.NewScanner(originalBody),
+		reverser:     NewStreamReverser(tokenMap),
+		provider:     provider,
+	}
+}
+
+func (s *StreamingReversalReader) Read(p []byte) (int, error) {
+	if s.outBuffer.Len() > 0 {
+		return s.outBuffer.Read(p)
+	}
+
+	if s.scanner.Scan() {
+		line := s.scanner.Text()
+		modifiedLine := s.processLine(line)
+		s.outBuffer.WriteString(modifiedLine + "\n")
+		return s.outBuffer.Read(p)
+	}
+
+	if err := s.scanner.Err(); err != nil {
+		return 0, err
+	}
+
+	flushedText := s.reverser.Flush()
+	if flushedText != "" {
+		// If there is any leftover text, output it.
+	}
+
+	return 0, io.EOF
+}
+
+func (s *StreamingReversalReader) Close() error {
+	return s.originalBody.Close()
+}
+
+func extractDeltaText(chunk []byte, provider string) (string, bool) {
+	var data map[string]interface{}
+	if err := json.Unmarshal(chunk, &data); err != nil {
+		return "", false
+	}
+
+	switch provider {
+	case "openai":
+		choices, ok := data["choices"].([]interface{})
+		if !ok || len(choices) == 0 {
+			return "", false
+		}
+		choice, ok := choices[0].(map[string]interface{})
+		if !ok {
+			return "", false
+		}
+		delta, ok := choice["delta"].(map[string]interface{})
+		if !ok {
+			return "", false
+		}
+		content, ok := delta["content"].(string)
+		if !ok {
+			return "", false
+		}
+		return content, true
+
+	case "anthropic":
+		delta, ok := data["delta"].(map[string]interface{})
+		if !ok {
+			return "", false
+		}
+		text, ok := delta["text"].(string)
+		if ok {
+			return text, true
+		}
+		return "", false
+
+	case "gemini":
+		candidates, ok := data["candidates"].([]interface{})
+		if !ok || len(candidates) == 0 {
+			return "", false
+		}
+		cand, ok := candidates[0].(map[string]interface{})
+		if !ok {
+			return "", false
+		}
+		content, ok := cand["content"].(map[string]interface{})
+		if !ok {
+			return "", false
+		}
+		parts, ok := content["parts"].([]interface{})
+		if !ok || len(parts) == 0 {
+			return "", false
+		}
+		part, ok := parts[0].(map[string]interface{})
+		if !ok {
+			return "", false
+		}
+		text, ok := part["text"].(string)
+		if !ok {
+			return "", false
+		}
+		return text, true
+	}
+	return "", false
+}
+
+func injectDeltaText(chunk []byte, provider string, newText string) ([]byte, error) {
+	var data map[string]interface{}
+	if err := json.Unmarshal(chunk, &data); err != nil {
+		return nil, err
+	}
+
+	switch provider {
+	case "openai":
+		choices, _ := data["choices"].([]interface{})
+		choice, _ := choices[0].(map[string]interface{})
+		delta, _ := choice["delta"].(map[string]interface{})
+		delta["content"] = newText
+	case "anthropic":
+		delta, _ := data["delta"].(map[string]interface{})
+		delta["text"] = newText
+	case "gemini":
+		candidates, _ := data["candidates"].([]interface{})
+		cand, _ := candidates[0].(map[string]interface{})
+		content, _ := cand["content"].(map[string]interface{})
+		parts, _ := content["parts"].([]interface{})
+		part, _ := parts[0].(map[string]interface{})
+		part["text"] = newText
+	}
+
+	return json.Marshal(data)
+}
+
+func (s *StreamingReversalReader) processLine(line string) string {
+	if strings.HasPrefix(line, "data: ") {
+		jsonStr := strings.TrimPrefix(line, "data: ")
+		if jsonStr == "[DONE]" {
+			return line
+		}
+		text, ok := extractDeltaText([]byte(jsonStr), s.provider)
+		if !ok {
+			return line
+		}
+		newText := s.reverser.ProcessChunk(text)
+		modifiedJSON, err := injectDeltaText([]byte(jsonStr), s.provider, newText)
+		if err != nil {
+			return line
+		}
+		return "data: " + string(modifiedJSON)
+	}
+
+	if strings.HasPrefix(strings.TrimSpace(line), "{") {
+		text, ok := extractDeltaText([]byte(line), s.provider)
+		if !ok {
+			return line
+		}
+		newText := s.reverser.ProcessChunk(text)
+		modifiedJSON, err := injectDeltaText([]byte(line), s.provider, newText)
+		if err != nil {
+			return line
+		}
+		return string(modifiedJSON)
+	}
+
+	return line
+}
+
+// Latency Profiling Wrapper
+func ProfileRedaction(label string, fn func()) time.Duration {
+	start := time.Now()
+	fn()
+	duration := time.Since(start)
+	log.Printf("[PROFILER] %s took %v", label, duration)
+	return duration
+}

@@ -1,0 +1,48 @@
+"""Cryptographic utilities for token decryption"""
+import base64
+import os
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
+
+
+def get_encryption_key() -> bytes:
+    """Gets the encryption key and pads/truncates it to 32 bytes (matching Go gateway)"""
+    key_str = os.getenv("ENCRYPTION_KEY")
+    if not key_str:
+        key_str = os.getenv("ENVELOPE_KEY", "authclaw-default-32-byte-key-12")
+
+    key_bytes = key_str.encode("utf-8")
+    if len(key_bytes) > 32:
+        return key_bytes[:32]
+    elif len(key_bytes) < 32:
+        return key_bytes + b"\x00" * (32 - len(key_bytes))
+    return key_bytes
+
+
+def decrypt_deterministic(ciphertext_str: str) -> str:
+    """Decrypts base64 encoded ciphertext using AES-256 CBC with a derived IV (matching Go gateway)"""
+    key = get_encryption_key()
+    try:
+        data = base64.b64decode(ciphertext_str)
+        if len(data) < 16:
+            raise ValueError("Ciphertext too short")
+        iv = data[:16]
+        ciphertext = data[16:]
+
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+        decryptor = cipher.decryptor()
+        padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+
+        # PKCS7 unpadding
+        padding_len = padded_plaintext[-1]
+        if padding_len < 1 or padding_len > 16:
+            raise ValueError("Invalid padding length")
+        
+        # Verify padding bytes
+        for b in padded_plaintext[-padding_len:]:
+            if b != padding_len:
+                raise ValueError("Invalid padding content")
+
+        return padded_plaintext[:-padding_len].decode("utf-8")
+    except Exception as e:
+        raise ValueError(f"Failed to decrypt value: {str(e)}")

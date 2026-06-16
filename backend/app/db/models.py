@@ -1,0 +1,250 @@
+"""SQLAlchemy ORM Models for AuthClaw"""
+from datetime import datetime
+from typing import Optional, List
+from sqlalchemy import (
+    Column, String, UUID, DateTime, Boolean, ForeignKey,
+    Integer, Text, ARRAY, JSON, Index, Float, create_engine
+)
+from app.db.base import Base
+from sqlalchemy.orm import relationship
+import uuid
+from sqlalchemy import UniqueConstraint, Enum
+
+
+class Tenant(Base):
+    """Multi-tenant tenant model"""
+    __tablename__ = "tenants"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), nullable=False, unique=True)
+    tier = Column(String(50), nullable=False, default="starter")  # starter, pro, enterprise
+    status = Column(String(50), nullable=False, default="active")  # active, suspended
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    users = relationship("User", back_populates="tenant", cascade="all, delete-orphan")
+    api_keys = relationship("APIKey", back_populates="tenant", cascade="all, delete-orphan")
+    policies = relationship("Policy", back_populates="tenant", cascade="all, delete-orphan")
+    gateways = relationship("GatewayConfig", back_populates="tenant", cascade="all, delete-orphan")
+    redaction_tokens = relationship("RedactionToken", back_populates="tenant", cascade="all, delete-orphan")
+    workflows = relationship("ComplianceWorkflow", back_populates="tenant", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_tenant_status", "status"),
+    )
+
+
+class User(Base):
+    """User model with tenant isolation"""
+    __tablename__ = "users"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    email = Column(String(255), nullable=False)
+    password_hash = Column(String(255), nullable=True)
+    role = Column(
+    Enum("admin", "operator", "viewer", name="user_role"),
+    nullable=False,
+    default="viewer"
+    )  # admin, operator, viewer
+    mfa_enabled = Column(Boolean, default=False)
+    mfa_secret = Column(String(32), nullable=True)  # TOTP secret (encrypted)
+    is_active = Column(Boolean, default=True)
+    last_login = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    tenant = relationship("Tenant", back_populates="users")
+    approvals = relationship("PendingApproval", back_populates="approver", foreign_keys="PendingApproval.approver_id")
+
+    __table_args__ = (
+    UniqueConstraint(
+        "tenant_id",
+        "email",
+        name="uq_tenant_email"
+    ),
+    Index("idx_user_tenant_email", "tenant_id", "email"),
+    Index("idx_user_is_active", "is_active"),
+    )
+
+
+class APIKey(Base):
+    """API Key for service-to-service authentication"""
+    __tablename__ = "api_keys"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    key_hash = Column(String(255), nullable=False, unique=True)  # SHA-256 hash
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    scopes = Column(ARRAY(String), nullable=False, default=["read"])  # read, write, admin
+    is_active = Column(Boolean, default=True)
+    last_used = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    tenant = relationship("Tenant", back_populates="api_keys")
+
+    __table_args__ = (
+        Index("idx_apikey_tenant", "tenant_id"),
+        Index("idx_apikey_active", "is_active"),
+    )
+
+
+class Policy(Base):
+    """YAML Policy storage per tenant"""
+    __tablename__ = "policies"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    policy_yaml = Column(Text, nullable=False)  # Full YAML policy content
+    version = Column(Integer, nullable=False, default=1)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    tenant = relationship("Tenant", back_populates="policies")
+
+    __table_args__ = (
+        Index("idx_policy_tenant", "tenant_id"),
+        Index("idx_policy_active", "is_active"),
+    )
+
+
+class GatewayConfig(Base):
+    """Gateway routing configuration per tenant"""
+    __tablename__ = "gateway_configs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    name = Column(String(255), nullable=False)
+    provider = Column(String(50), nullable=False)  # openai, anthropic, cohere, azure_openai
+    endpoint = Column(String(512), nullable=False)
+    model_whitelist = Column(ARRAY(String), nullable=True)  # If null, allow all models
+    redaction_strategy = Column(String(50), nullable=False, default="mask")  # mask, hash, synthetic
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    tenant = relationship("Tenant", back_populates="gateways")
+
+    __table_args__ = (
+        Index("idx_gateway_tenant", "tenant_id"),
+        Index("idx_gateway_active", "is_active"),
+    )
+
+
+class RedactionToken(Base):
+    """Reversible redaction token mappings per tenant"""
+    __tablename__ = "redaction_tokens"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    original_value = Column(Text, nullable=False)  # Encrypted
+    token_hash = Column(String(255), nullable=False)  # SHA-256 hash of token
+    token_value = Column(String(255), nullable=False)  # Synthetic/masked value
+    strategy = Column(String(50), nullable=False)  # mask, hash, synthetic
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    # Relationships
+    tenant = relationship("Tenant", back_populates="redaction_tokens")
+
+    __table_args__ = (
+        Index("idx_redaction_tenant", "tenant_id"),
+        Index("idx_redaction_hash", "token_hash"),
+    )
+
+
+class PendingApproval(Base):
+    """HITL approval workflow state"""
+    __tablename__ = "pending_approvals"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    action_id = Column(String(255), nullable=False)  # Unique action identifier
+    action_type = Column(String(50), nullable=False)  # remediation, configuration_change, etc.
+    action_description = Column(Text, nullable=False)
+    action_payload = Column(JSON, nullable=False)  # Full action details
+    status = Column(String(50), nullable=False, default="PENDING")  # PENDING, APPROVED, REJECTED, EXPIRED
+    requester_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    approver_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    mfa_verified = Column(Boolean, default=False)
+    mfa_timestamp = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)  # 30 min from creation
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    approver = relationship("User", back_populates="approvals", foreign_keys=[approver_id])
+
+    __table_args__ = (
+        Index("idx_approval_tenant", "tenant_id"),
+        Index("idx_approval_status", "status"),
+        Index("idx_approval_expires", "expires_at"),
+    )
+
+
+class AuditLogMetadata(Base):
+    """Metadata reference table for ClickHouse audit logs (actual logs stored in ClickHouse)"""
+    __tablename__ = "audit_log_metadata"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    record_id = Column(UUID(as_uuid=True), nullable=False, unique=True)  # Matches ClickHouse record_id
+    actor_id = Column(UUID(as_uuid=True), nullable=True)
+    action = Column(String(255), nullable=False)
+    frameworks_affected = Column(ARRAY(String), nullable=True)  # GDPR, HIPAA, SOC2
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_audit_metadata_tenant", "tenant_id"),
+        Index("idx_audit_metadata_record", "record_id"),
+        Index("idx_audit_metadata_created", "created_at"),
+    )
+
+
+class ComplianceWorkflow(Base):
+    """LangGraph compliance workflow execution state"""
+    __tablename__ = "compliance_workflows"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    workflow_id = Column(String(255), nullable=False, unique=True)  # LangGraph workflow execution ID
+    request_id = Column(String(255), nullable=True)  # Request correlation ID
+    framework = Column(String(50), nullable=False)  # GDPR, HIPAA, SOC2
+    current_state = Column(String(50), nullable=False, default="GATHER_EVIDENCE")
+    findings = Column(JSON, nullable=True)
+    risk_score = Column(Float, nullable=True)
+    remediation_plan = Column(JSON, nullable=True)
+    approval_id = Column(UUID(as_uuid=True), ForeignKey("pending_approvals.id"), nullable=True)
+    approval_status = Column(String(50), nullable=True)  # PENDING, APPROVED, REJECTED, EXPIRED
+    execution_status = Column(String(50), nullable=False, default="RUNNING")
+    execution_result = Column(JSON, nullable=True)
+    error_message = Column(Text, nullable=True)
+    retry_count = Column(Integer, nullable=False, default=0)
+    state_data = Column(JSON, nullable=True)  # Full LangGraph state snapshot for recovery
+    started_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    tenant = relationship("Tenant", back_populates="workflows")
+    approval = relationship("PendingApproval")
+
+    __table_args__ = (
+        Index("idx_workflow_tenant", "tenant_id"),
+        Index("idx_workflow_status", "execution_status"),
+        Index("idx_workflow_state", "current_state"),
+        Index("idx_workflow_wfid", "workflow_id"),
+    )
