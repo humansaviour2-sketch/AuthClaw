@@ -345,7 +345,7 @@ def test_workflow_approval_integration(client: TestClient, db_session: Session):
 
     headers = {"Authorization": f"Bearer {api_key_raw}"}
 
-    # 2. Create compliance workflow
+    # 2. Create compliance workflow (scan executes to completion)
     response = client.post(
         "/v1/workflows",
         headers=headers,
@@ -354,11 +354,22 @@ def test_workflow_approval_integration(client: TestClient, db_session: Session):
     assert response.status_code == status.HTTP_201_CREATED
     wf_data = response.json()
     workflow_id = wf_data["workflow_id"]
-    approval_id = wf_data["approval_id"]
     
-    assert wf_data["current_state"] == "AWAITING_APPROVAL"
-    assert wf_data["execution_status"] == "PAUSED"
-    assert wf_data["approval_status"] == "PENDING"
+    assert wf_data["current_state"] == "COMPLETE"
+    assert wf_data["execution_status"] == "COMPLETED"
+
+    # Trigger remediation (creates the pending approval)
+    response_remediate = client.post(
+        f"/v1/workflows/{workflow_id}/remediate",
+        headers=headers
+    )
+    assert response_remediate.status_code == status.HTTP_200_OK
+    wf_remediate_data = response_remediate.json()
+    approval_id = wf_remediate_data["approval_id"]
+
+    assert wf_remediate_data["current_state"] == "AWAITING_APPROVAL"
+    assert wf_remediate_data["execution_status"] == "PAUSED"
+    assert wf_remediate_data["approval_status"] == "PENDING"
     assert approval_id is not None
 
     # Verify database state for PendingApproval and ComplianceWorkflow

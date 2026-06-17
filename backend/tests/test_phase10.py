@@ -95,12 +95,18 @@ def test_phase10_mfa_setup_and_verification(client: TestClient, db_session: Sess
     mfa_secret = mfa_data["mfa_secret"]
     backup_codes = mfa_data["backup_codes"]
 
-    # 3. Create Compliance Workflow (will pause at AWAITING_APPROVAL)
+    # 3. Create Compliance Workflow (scan executes to completion)
     response_wf = client.post("/v1/workflows", headers=headers, json={"framework": "HIPAA"})
     assert response_wf.status_code == status.HTTP_201_CREATED
     wf_data = response_wf.json()
     workflow_id = wf_data["workflow_id"]
-    approval_id = wf_data["approval_id"]
+    assert wf_data["current_state"] == "COMPLETE"
+
+    # Trigger remediation to get the approval_id
+    response_remediate = client.post(f"/v1/workflows/{workflow_id}/remediate", headers=headers)
+    assert response_remediate.status_code == status.HTTP_200_OK
+    remediate_data = response_remediate.json()
+    approval_id = remediate_data["approval_id"]
 
     # 4. Attempt Approval without MFA code (should return 400 Bad Request)
     response_no_mfa = client.post(f"/v1/workflows/{workflow_id}/approve", headers=headers)
@@ -175,12 +181,18 @@ def test_phase10_approval_expiration(client: TestClient, db_session: Session):
 
     headers = {"Authorization": f"Bearer {api_key_raw}"}
 
-    # 2. Create Compliance Workflow (paused at AWAITING_APPROVAL)
+    # 2. Create Compliance Workflow (scan executes to completion)
     response_wf = client.post("/v1/workflows", headers=headers, json={"framework": "HIPAA"})
     assert response_wf.status_code == status.HTTP_201_CREATED
     wf_data = response_wf.json()
     workflow_id = wf_data["workflow_id"]
-    approval_id = wf_data["approval_id"]
+    assert wf_data["current_state"] == "COMPLETE"
+
+    # Trigger remediation to get the approval_id
+    response_remediate = client.post(f"/v1/workflows/{workflow_id}/remediate", headers=headers)
+    assert response_remediate.status_code == status.HTTP_200_OK
+    remediate_data = response_remediate.json()
+    approval_id = remediate_data["approval_id"]
 
     # 3. Simulate Expiry by updating expires_at to past time in DB
     db_session.execute(text(f"SET app.current_tenant_id = '{tenant_id}'"))

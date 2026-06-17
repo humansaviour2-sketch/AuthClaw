@@ -118,8 +118,13 @@ class TestWorkflowHappyPath:
         assert state["risk_score"] == 1.0
 
         state = generate_remediation_plan(state)
-        assert state["current_state"] == WorkflowState.AWAITING_APPROVAL.value
+        assert state["current_state"] == WorkflowState.COMPLETE.value
         assert len(state["remediation_plan"]) == 3  # 3 non-compliant findings
+
+        # Manually transition to AWAITING_APPROVAL to simulate remediation trigger
+        state["current_state"] = WorkflowState.AWAITING_APPROVAL.value
+        state["execution_status"] = ExecutionStatus.PAUSED.value
+        state["approval_id"] = ""
 
         # First call creates approval, sets PAUSED
         state = awaiting_approval(state)

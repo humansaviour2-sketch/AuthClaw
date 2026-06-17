@@ -1,5 +1,14 @@
 """AuthClaw Backend - FastAPI Application"""
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env.local
+env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env.local")
+if os.path.exists(env_path):
+    load_dotenv(env_path)
+else:
+    load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine

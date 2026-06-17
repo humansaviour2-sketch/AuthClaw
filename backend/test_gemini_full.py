@@ -60,7 +60,7 @@ def seed_db():
     print("Database seeded successfully.")
     return api_key_raw
 
-def test_connectivity(api_key_raw):
+def run_connectivity_test(api_key_raw):
     print("Testing live Gemini 2.5 Flash-Lite connectivity through AuthClaw Gateway...")
     
     url = "http://localhost:8080/v1/models/gemini-2.5-flash-lite:generateContent"
@@ -101,4 +101,4 @@ def test_connectivity(api_key_raw):
 
 if __name__ == "__main__":
     key = seed_db()
-    test_connectivity(key)
+    run_connectivity_test(key)

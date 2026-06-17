@@ -68,6 +68,8 @@ export default function AgentPage() {
   const [input, setInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [selectedResult, setSelectedResult] = useState<any>(null);
+  const [showRawJson, setShowRawJson] = useState(false);
+  const [remediating, setRemediating] = useState(false);
 
   // HITL Approval States
   const [selectedApproval, setSelectedApproval] = useState<Approval | null>(null);
@@ -77,6 +79,29 @@ export default function AgentPage() {
   const [showMfaInput, setShowMfaInput] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const handleRemediate = async (workflowId: string) => {
+    if (!workflowId) return;
+    setRemediating(true);
+    try {
+      const res = await fetch(`/api/workflows/${workflowId}/remediate`, {
+        method: "POST",
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to trigger remediation");
+      }
+
+      const updatedWorkflow = await res.json();
+      setSelectedResult(updatedWorkflow);
+      await fetchWorkflowsAndApprovals();
+    } catch (err: any) {
+      alert(err.message || "Error starting remediation");
+    } finally {
+      setRemediating(false);
+    }
+  };
 
   const fetchWorkflowsAndApprovals = async () => {
     try {
@@ -139,58 +164,41 @@ export default function AgentPage() {
     setMessages((prev) => [...prev, { sender: "user", text: userText, timestamp: new Date() }]);
     setChatLoading(true);
 
-    // Foundation for plain-English query analysis
-    setTimeout(async () => {
-      const query = userText.toLowerCase();
-      let responseText = "";
-      let resultsData = null;
+    try {
+      const res = await fetch("/api/agent/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: userText }),
+      });
 
-      try {
-        if (query.includes("gdpr") && (query.includes("run") || query.includes("scan") || query.includes("start"))) {
-          responseText = "Launching GDPR compliance scan workflow. Spinning up an ephemeral worker container in the control plane...";
-          const scan = await triggerScan("GDPR");
-          responseText += `\n\n[System] Workflow launched! ID: ${scan.workflow_id}. State: ${scan.current_state}.`;
-          resultsData = scan;
-        } else if (query.includes("soc") && (query.includes("run") || query.includes("scan") || query.includes("start"))) {
-          responseText = "Initiating SOC 2 compliance check. Analyzing active IAM roles and public bucket metadata...";
-          const scan = await triggerScan("SOC2");
-          responseText += `\n\n[System] Workflow launched! ID: ${scan.workflow_id}. State: ${scan.current_state}.`;
-          resultsData = scan;
-        } else if (query.includes("hipaa") && (query.includes("run") || query.includes("scan") || query.includes("start"))) {
-          responseText = "Launching HIPAA technical safeguards scan. Checking vector database configuration and data redaction policies...";
-          const scan = await triggerScan("HIPAA");
-          responseText += `\n\n[System] Workflow launched! ID: ${scan.workflow_id}. State: ${scan.current_state}.`;
-          resultsData = scan;
-        } else if (query.includes("gate") || query.includes("route")) {
-          const res = await fetch("/api/gateways");
-          const gateways = await res.json();
-          responseText = `I found ${gateways.length} active gateway routes configured for this tenant.`;
-          resultsData = gateways;
-        } else if (query.includes("approval") || query.includes("hitl")) {
-          responseText = `There are currently ${approvals.filter(a => a.status === "PENDING").length} pending approvals requiring authorization.`;
-          resultsData = approvals;
-        } else if (query.includes("help") || query.includes("command")) {
-          responseText = "You can interact with me using plain-English. Here are some commands I understand:\n" +
-            "• 'Run GDPR compliance scan'\n" +
-            "• 'Start SOC2 audit check'\n" +
-            "• 'List configured gateway routes'\n" +
-            "• 'Show pending approvals'";
-        } else {
-          responseText = "I've analyzed your query. I am ready to trigger compliance scans or inspect active configurations. Try typing 'Run GDPR compliance scan' to test the LangGraph workflow engine.";
-        }
-      } catch (err: any) {
-        responseText = `Failed to execute request: ${err.message}`;
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Failed to communicate with Agent");
       }
+
+      const data = await res.json();
+      let responseText = data.text || "No response received.";
+      let resultsData = data.workflow || data.approval || null;
 
       setMessages((prev) => [
         ...prev, 
         { sender: "agent", text: responseText, timestamp: new Date(), results: resultsData }
       ]);
+
       if (resultsData) {
         setSelectedResult(resultsData);
+        setShowRawJson(false); // default to visual report
       }
+
+      await fetchWorkflowsAndApprovals();
+    } catch (err: any) {
+      setMessages((prev) => [
+        ...prev, 
+        { sender: "agent", text: `Failed to execute request: ${err.message}`, timestamp: new Date() }
+      ]);
+    } finally {
       setChatLoading(false);
-    }, 1000);
+    }
   };
 
   const handleApproveClick = (appr: Approval) => {
@@ -497,20 +505,191 @@ export default function AgentPage() {
 
           {/* Results Details Panel */}
           <div className="rounded-2xl border border-slate-800 bg-[#09090d] shadow-xl p-5 space-y-3">
-            <div className="flex items-center gap-1.5 text-slate-400 text-xs font-bold uppercase tracking-wider">
-              <Terminal className="w-4 h-4 text-indigo-400" />
-              Inspector Details Panel
-            </div>
-            
-            <div className="rounded-lg border border-slate-850 bg-[#07070a] p-3 text-[10px] font-mono text-slate-400 overflow-x-auto min-h-[140px] max-h-[220px]">
-              {selectedResult ? (
-                <pre>{JSON.stringify(selectedResult, null, 2)}</pre>
-              ) : (
-                <div className="h-full flex items-center justify-center text-slate-600 text-center italic">
-                  Select a workflow result or gateway route in the chat to inspect its telemetry object.
-                </div>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-slate-400 text-xs font-bold uppercase tracking-wider">
+                <Terminal className="w-4 h-4 text-indigo-400" />
+                Inspector Details Panel
+              </div>
+              {selectedResult?.workflow_id && (
+                <button
+                  onClick={() => setShowRawJson(!showRawJson)}
+                  className="px-2 py-1 text-[9px] font-bold uppercase tracking-wider rounded border border-slate-800 bg-[#0c0c12] hover:bg-slate-800/80 text-slate-400 hover:text-slate-200 transition cursor-pointer"
+                >
+                  {showRawJson ? "Visual Report" : "Raw JSON"}
+                </button>
               )}
             </div>
+            
+            {selectedResult && selectedResult.workflow_id && !showRawJson ? (
+              <div className="space-y-4 text-xs max-h-[450px] overflow-y-auto pr-1">
+                {/* Scan Summary */}
+                <div className="p-3.5 rounded-xl border border-slate-800 bg-[#0c0c12]/40 space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400">Scan Summary</span>
+                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${
+                      selectedResult.execution_status === "COMPLETED" 
+                        ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                        : selectedResult.execution_status === "PAUSED"
+                          ? "bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse"
+                          : "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 animate-pulse"
+                    }`}>
+                      {selectedResult.execution_status}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2.5 pt-1 text-[11px]">
+                    <div>
+                      <p className="text-slate-550 text-[9px] font-bold">FRAMEWORK</p>
+                      <p className="font-semibold text-slate-350">{selectedResult.framework}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-550 text-[9px] font-bold">RISK SCORE</p>
+                      <p className={`font-semibold ${selectedResult.risk_score > 0.5 ? "text-red-400" : "text-emerald-400"}`}>
+                        {selectedResult.risk_score !== null ? `${(selectedResult.risk_score * 100).toFixed(0)}%` : "N/A"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-slate-550 text-[9px] font-bold">STARTED</p>
+                      <p className="text-slate-450 font-mono text-[9px]">
+                        {selectedResult.started_at ? new Date(selectedResult.started_at).toLocaleTimeString() : "-"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-slate-550 text-[9px] font-bold">COMPLETED</p>
+                      <p className="text-slate-450 font-mono text-[9px]">
+                        {selectedResult.completed_at ? new Date(selectedResult.completed_at).toLocaleTimeString() : "-"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Findings List */}
+                <div className="space-y-2">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-400">Findings</div>
+                  {(!selectedResult.findings || selectedResult.findings.length === 0) ? (
+                    <div className="text-slate-500 italic p-3 rounded-xl border border-slate-850 bg-[#07070a] text-center">No compliance violations found.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {selectedResult.findings.map((finding: any, idx: number) => (
+                        <div key={idx} className="p-3 rounded-xl border border-slate-800 bg-[#07070a] space-y-1.5">
+                          <div className="flex justify-between items-center">
+                            <span className="font-mono text-slate-200 font-bold">{finding.control}</span>
+                            <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${
+                              finding.status === "non_compliant"
+                                ? "bg-red-500/10 text-red-400 border border-red-500/20"
+                                : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                            }`}>
+                              {finding.status === "non_compliant" ? "NON COMPLIANT" : "COMPLIANT"}
+                            </span>
+                          </div>
+                          <p className="text-slate-350 text-[11px] leading-relaxed">{finding.description}</p>
+                          <div className="text-[9px] font-mono text-slate-500 leading-normal bg-slate-900/30 p-1.5 rounded border border-slate-850/40">
+                            <span className="font-bold text-slate-400">Evidence:</span> {finding.evidence}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Remediation Plan */}
+                <div className="space-y-2">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-400">Proposed Remediation Plan</div>
+                  {(!selectedResult.remediation_plan || selectedResult.remediation_plan.length === 0) ? (
+                    <div className="text-slate-500 italic p-3 rounded-xl border border-slate-850 bg-[#07070a] text-center">No remediation actions needed.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {selectedResult.remediation_plan.map((plan: any, idx: number) => (
+                        <div key={idx} className="p-3 rounded-xl border border-slate-800 bg-[#07070a] space-y-2">
+                          <div className="flex justify-between items-center">
+                            <span className="font-bold text-slate-300">{plan.action}</span>
+                            <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${
+                              plan.priority === "high"
+                                ? "bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse"
+                                : "bg-blue-500/10 text-blue-400 border border-blue-500/20"
+                            }`}>
+                              {plan.priority} Priority
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-400">
+                            <div>
+                              <span className="text-slate-550 font-bold">CONTROL:</span> {plan.finding_control}
+                            </div>
+                            <div>
+                              <span className="text-slate-550 font-bold">EST. EFFORT:</span> {plan.estimated_effort}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Execution History */}
+                <div className="space-y-2">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-400">Execution History</div>
+                  <div className="p-3 rounded-xl border border-slate-800 bg-[#07070a] space-y-2.5">
+                    {selectedResult.execution_result && selectedResult.execution_result.details ? (
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center text-[10px] border-b border-slate-850 pb-1.5">
+                          <span className="text-slate-500">Remediation Executed</span>
+                          <span className="text-emerald-400 font-bold">
+                            {selectedResult.execution_result.actions_successful}/{selectedResult.execution_result.actions_executed} Successful
+                          </span>
+                        </div>
+                        {selectedResult.execution_result.details.map((det: any, idx: number) => (
+                          <div key={idx} className="text-[10px] space-y-1">
+                            <div className="flex justify-between">
+                              <span className="font-bold text-slate-300">{det.connector} - {det.control}</span>
+                              <span className={det.status === "success" ? "text-emerald-400 animate-pulse" : "text-red-400"}>
+                                {det.status}
+                              </span>
+                            </div>
+                            <p className="text-slate-500 font-mono text-[9px]">{det.details}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="space-y-2 text-[10px] text-slate-400">
+                        <p>• Initial scan completed.</p>
+                        {selectedResult.approval_id ? (
+                          <p className="text-amber-400 animate-pulse">• Awaiting approval (Linked Approval ID: {selectedResult.approval_id})</p>
+                        ) : (
+                          <p>• No remediation has been applied yet.</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Apply Remediation Button (Explicit Workflow ID) */}
+                {selectedResult.execution_status === "COMPLETED" && selectedResult.current_state === "COMPLETE" && selectedResult.remediation_plan?.length > 0 && (
+                  <button
+                    onClick={() => handleRemediate(selectedResult.workflow_id)}
+                    disabled={remediating}
+                    className="w-full py-2 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg transition active:scale-[0.98] disabled:opacity-50 mt-4 flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    {remediating ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Initializing Remediation...
+                      </>
+                    ) : (
+                      "Apply Remediation"
+                    )}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-slate-850 bg-[#07070a] p-3 text-[10px] font-mono text-slate-400 overflow-x-auto min-h-[140px] max-h-[350px]">
+                {selectedResult ? (
+                  <pre>{JSON.stringify(selectedResult, null, 2)}</pre>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-slate-650 text-center italic py-12">
+                    Select a workflow result or gateway route in the ledger/chat to inspect.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
         </div>

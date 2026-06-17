@@ -445,7 +445,7 @@ export default function SettingsPage() {
 
               <div>
                 <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">Control Plane Host</p>
-                <p className="text-slate-300 mt-1 font-mono">http://localhost:8001/v1</p>
+                <p className="text-slate-300 mt-1 font-mono">http://localhost:8000/v1</p>
               </div>
             </div>
 

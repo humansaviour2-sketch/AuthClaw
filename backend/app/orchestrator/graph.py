@@ -167,20 +167,21 @@ def generate_remediation_plan(state: ComplianceState) -> ComplianceState:
             "steps": [f"Review {finding['control']}", "Apply fix", "Verify compliance"],
         })
     
-    # Determine next state: if plan exists, require approval
-    next_state = WorkflowState.AWAITING_APPROVAL.value if plan else WorkflowState.COMPLETE.value
+    # Scans execute without immediate approval, completing the scan stage
+    next_state = WorkflowState.COMPLETE.value
     
     emit = state.get("_emit_audit")
     if emit:
-        target = "AWAITING_APPROVAL" if plan else "COMPLETE"
         emit(state["workflow_id"], state["tenant_id"], state.get("request_id", ""),
-             f"GENERATE_REMEDIATION_PLAN→{target}", "generate_plan", "completed")
+             "GENERATE_REMEDIATION_PLAN→COMPLETE", "generate_plan", "completed")
     
     persist = state.get("_persist_state")
     new_state = {
         **state,
         "remediation_plan": plan,
         "current_state": next_state,
+        "execution_status": ExecutionStatus.COMPLETED.value,
+        "completed_at": datetime.now(tz=timezone.utc).isoformat(),
         "updated_at": datetime.now(tz=timezone.utc).isoformat(),
     }
     if persist:

@@ -146,6 +146,9 @@ export default function GatewayPage() {
     } else if (prov === "azure_openai") {
       setEndpoint("https://YOUR_RESOURCE.openai.azure.com/openai/deployments/YOUR_DEPLOYMENT/chat/completions");
       setWhitelistInput("gpt-4o, gpt-4");
+    } else if (prov === "gemini") {
+      setEndpoint("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent");
+      setWhitelistInput("gemini-2.5-flash-lite, gemini-2.5-flash, gemini-2.5-pro");
     }
   };
 
@@ -505,6 +508,7 @@ export default function GatewayPage() {
                     <option value="anthropic">Anthropic</option>
                     <option value="cohere">Cohere</option>
                     <option value="azure_openai">Azure OpenAI</option>
+                    <option value="gemini">Gemini</option>
                   </select>
                 </div>
                 <div>

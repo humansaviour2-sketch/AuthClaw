@@ -419,6 +419,72 @@ def reject_workflow(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.post("/{workflow_id}/remediate", response_model=WorkflowResponse)
+def remediate_workflow(
+    workflow_id: str,
+    request: Request,
+    db: Session = Depends(get_tenant_db),
+    _auth=require_scopes(["write"]),
+):
+    """Transition a completed scan into remediation mode and generate approval request."""
+    tenant_id = str(request.state.tenant_id)
+
+    # Fetch workflow record
+    wf = db.query(ComplianceWorkflow).filter(
+        ComplianceWorkflow.workflow_id == workflow_id,
+        ComplianceWorkflow.tenant_id == uuid.UUID(tenant_id),
+    ).first()
+
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    if wf.execution_status != "COMPLETED":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Workflow is not in COMPLETED state (current={wf.execution_status})",
+        )
+
+    if not wf.remediation_plan:
+        raise HTTPException(
+            status_code=400,
+            detail="No remediation plan is available for this workflow",
+        )
+
+    # Dynamically create pending approval
+    from app.orchestrator.runner import _create_approval_in_db, emit_audit_event
+    approval_id = _create_approval_in_db(db, tenant_id, workflow_id, wf.remediation_plan)
+
+    # Transition workflow to PAUSED/AWAITING_APPROVAL
+    wf.execution_status = "PAUSED"
+    wf.current_state = "AWAITING_APPROVAL"
+    wf.approval_status = "PENDING"
+    wf.approval_id = uuid.UUID(approval_id)
+
+    # Update state_data
+    from sqlalchemy.orm.attributes import flag_modified
+    state_data = wf.state_data or {}
+    state_data.update({
+        "current_state": "AWAITING_APPROVAL",
+        "execution_status": "PAUSED",
+        "approval_status": "PENDING",
+        "approval_id": approval_id,
+    })
+    wf.state_data = state_data
+    flag_modified(wf, "state_data")
+    wf.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+
+    emit_audit_event(
+        workflow_id, tenant_id, wf.request_id or "",
+        "COMPLETE→AWAITING_APPROVAL", "create_approval", "pending"
+    )
+
+    runner = ComplianceWorkflowRunner(db)
+    result = runner.get_status(workflow_id, tenant_id)
+    return WorkflowResponse(**result)
+
+
 @router.post("/recover", response_model=RecoveryResponse)
 def recover_workflows(
     request: Request,

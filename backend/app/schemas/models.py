@@ -100,7 +100,7 @@ class PolicyDetailResponse(BaseModel):
 class GatewayConfigCreate(BaseModel):
     """Schema for gateway configuration"""
     name: str = Field(..., min_length=1, max_length=255)
-    provider: str = Field(..., pattern="^(openai|anthropic|cohere|azure_openai)$")
+    provider: str = Field(..., pattern="^(openai|anthropic|cohere|azure_openai|gemini)$")
     endpoint: str = Field(..., min_length=1, max_length=512)
     model_whitelist: Optional[List[str]] = None
     redaction_strategy: str = Field(default="mask", pattern="^(mask|hash|synthetic)$")

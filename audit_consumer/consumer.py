@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 from kafka import KafkaConsumer, KafkaProducer
 
 from clickhouse_writer import get_client, get_prior_hash, insert_audit_event
-from hash_chain import GENESIS_HASH, compute_integrity_hash
+from hash_chain import GENESIS_HASH, compute_integrity_hash, standardize_uuid, standardize_timestamp
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Config
@@ -244,6 +244,9 @@ def main():
 def _process_message(ch_client, payload: dict) -> None:
     """Normalise, chain-hash, and insert a single audit event."""
     row = normalise_event(payload)
+    row["record_id"] = standardize_uuid(row["record_id"])
+    row["tenant_id"] = standardize_uuid(row["tenant_id"])
+    row["timestamp"] = standardize_timestamp(row["timestamp"])
     tenant_id = row["tenant_id"]
 
     if not tenant_id:

@@ -47,6 +47,7 @@ class ClickHouseAuditEvent(BaseModel):
     response_status: int
     duration_ms: int
     frameworks_affected: List[str]
+    execution_trace: str = "[]"
     request_id: str = ""  # propagated from X-Request-ID gateway header
     prior_hash: str
     integrity_hash: str
@@ -67,21 +68,19 @@ class AuditLogsResponse(BaseModel):
 
 
 def _get_clickhouse_client() -> Optional[clickhouse_connect.driver.Client]:
-    """Return a ClickHouse client, or None if CLICKHOUSE_HOST is not configured."""
+    """Return a ClickHouse client, or None if CLICKHOUSE_HOST is not configured.
+    Bubbles up exceptions if host is configured but connection fails.
+    """
     host = os.getenv("CLICKHOUSE_HOST")
     if not host:
         return None
-    try:
-        return clickhouse_connect.get_client(
-            host=host,
-            port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
-            database=os.getenv("CLICKHOUSE_DB", "authclaw"),
-            username=os.getenv("CLICKHOUSE_USER", "authclaw"),
-            password=os.getenv("CLICKHOUSE_PASSWORD", "authclaw"),
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("ClickHouse unavailable — falling back to PostgreSQL: %s", exc)
-        return None
+    return clickhouse_connect.get_client(
+        host=host,
+        port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
+        database=os.getenv("CLICKHOUSE_DB", "authclaw"),
+        username=os.getenv("CLICKHOUSE_USER", "authclaw"),
+        password=os.getenv("CLICKHOUSE_PASSWORD", "authclaw"),
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -92,25 +91,81 @@ _GENESIS_HASH = "GENESIS"
 _EXCLUDED_FIELDS = {"prior_hash", "integrity_hash", "created_at", "chain_valid"}
 
 
+import uuid
+from datetime import datetime, timezone
+
+def standardize_uuid(val: Any) -> str:
+    if not val:
+        return ""
+    try:
+        return str(uuid.UUID(str(val)))
+    except ValueError:
+        return str(val)
+
+def standardize_timestamp(ts: Any) -> str:
+    if isinstance(ts, (int, float)):
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+    elif isinstance(ts, str):
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    elif isinstance(ts, datetime):
+        dt = ts
+    else:
+        dt = datetime.now(tz=timezone.utc)
+    
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    
+    ms = dt.microsecond // 1000
+    return f"{dt.strftime('%Y-%m-%dT%H:%M:%S')}.{ms:03d}Z"
+
 def _canonical_json(record: dict) -> str:
-    clean = {k: v for k, v in record.items() if k not in _EXCLUDED_FIELDS}
-    return json.dumps(clean, sort_keys=True, separators=(",", ":"), default=str)
+    record_id = standardize_uuid(record.get("record_id"))
+    tenant_id = standardize_uuid(record.get("tenant_id"))
+    timestamp_str = standardize_timestamp(record.get("timestamp"))
+    
+    clean = {
+        "record_id": record_id,
+        "tenant_id": tenant_id,
+        "timestamp": timestamp_str,
+        "actor_id": str(record.get("actor_id", "")),
+        "actor_type": str(record.get("actor_type", "")),
+        "action": str(record.get("action", "")),
+        "policy_id": str(record.get("policy_id", "")),
+        "provider": str(record.get("provider", "")),
+        "model": str(record.get("model", "")),
+        "reason": str(record.get("reason", "")),
+        "prompt_count": int(record.get("prompt_count", 0)),
+        "request_size": int(record.get("request_size", 0)),
+        "response_status": int(record.get("response_status", 0)),
+        "duration_ms": int(record.get("duration_ms", 0)),
+        "frameworks_affected": sorted(list(record.get("frameworks_affected") or [])),
+        "execution_trace": str(record.get("execution_trace", "[]")),
+        "request_id": str(record.get("request_id", "")),
+    }
+    return json.dumps(clean, sort_keys=True, separators=(",", ":"))
 
 
 def _verify_chain(records: List[dict]) -> List[dict]:
-    """Annotate each record with chain_valid=True/False."""
+    """Annotate each record with chain_valid=True/False (verifying chronologically)."""
+    # Reverse records to go oldest -> newest for rolling verification
+    asc_records = list(reversed(records))
     prior_by_tenant: Dict[str, str] = {}
 
-    for record in records:
+    for record in asc_records:
         tenant_id = record.get("tenant_id", "")
-        prior_hash = prior_by_tenant.get(tenant_id, _GENESIS_HASH)
+        if tenant_id not in prior_by_tenant:
+            prior_by_tenant[tenant_id] = record.get("prior_hash", _GENESIS_HASH)
+        prior_hash = prior_by_tenant[tenant_id]
         data = _canonical_json(record) + prior_hash
         expected = hashlib.sha256(data.encode("utf-8")).hexdigest()
         actual = record.get("integrity_hash", "")
         record["chain_valid"] = expected == actual
         prior_by_tenant[tenant_id] = actual or expected
 
-    return records
+    # Reverse back to keep original order (newest first)
+    return list(reversed(asc_records))
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -144,9 +199,18 @@ def get_audit_logs(
     tenant_id: str = str(request.state.tenant_id)
 
     # ── ClickHouse path ────────────────────────────────────────────────────────
-    ch = _get_clickhouse_client()
-    if ch is not None:
-        return _query_clickhouse(ch, tenant_id, limit, offset, action, integrity_check)
+    host = os.getenv("CLICKHOUSE_HOST")
+    if host:
+        try:
+            ch = _get_clickhouse_client()
+            if ch is not None:
+                return _query_clickhouse(ch, tenant_id, limit, offset, action, integrity_check)
+        except Exception as exc:
+            logger.error("ClickHouse connection or query failed: %s", exc)
+            raise HTTPException(
+                status_code=503,
+                detail=f"ClickHouse audit storage configured but unavailable: {str(exc)}"
+            )
 
     # ── PostgreSQL fallback ────────────────────────────────────────────────────
     return _query_postgres(db, tenant_id, limit, offset, action)
@@ -172,28 +236,29 @@ def _query_clickhouse(
 
     query = f"""
         SELECT
-            toString(record_id)    AS record_id,
-            toString(tenant_id)    AS tenant_id,
-            timestamp,
-            actor_id,
-            actor_type,
-            action,
-            policy_id,
-            provider,
-            model,
-            reason,
-            prompt_count,
-            request_size,
-            response_status,
-            duration_ms,
-            frameworks_affected,
-            request_id,
-            prior_hash,
-            integrity_hash
-        FROM authclaw.audit_events
-        WHERE tenant_id = {{tenant_id:UUID}}
+            toString(ae.record_id)    AS record_id,
+            toString(ae.tenant_id)    AS tenant_id,
+            ae.timestamp              AS timestamp,
+            ae.actor_id               AS actor_id,
+            ae.actor_type             AS actor_type,
+            ae.action                 AS action,
+            ae.policy_id              AS policy_id,
+            ae.provider               AS provider,
+            ae.model                  AS model,
+            ae.reason                 AS reason,
+            ae.prompt_count           AS prompt_count,
+            ae.request_size           AS request_size,
+            ae.response_status        AS response_status,
+            ae.duration_ms            AS duration_ms,
+            ae.frameworks_affected    AS frameworks_affected,
+            ae.execution_trace        AS execution_trace,
+            ae.request_id             AS request_id,
+            ae.prior_hash             AS prior_hash,
+            ae.integrity_hash         AS integrity_hash
+        FROM authclaw.audit_events AS ae
+        WHERE ae.tenant_id = {{tenant_id:UUID}}
         {action_filter}
-        ORDER BY timestamp DESC, record_id DESC
+        ORDER BY ae.timestamp DESC, ae.record_id DESC
         LIMIT {{limit:UInt32}}
         OFFSET {{offset:UInt32}}
     """
