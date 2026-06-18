@@ -76,37 +76,58 @@ var presidioClientHTTP = &http.Client{
 	Timeout: 10 * time.Second,
 }
 
-func (c *PresidioClient) Analyze(ctx context.Context, text string) ([]AnalyzeResult, error) {
-	reqBody := AnalyzeRequest{
-		Text:     text,
-		Language: "en",
-		AdHocRecognizers: []PresidioRecognizer{
-			{
-				Name:              "HealthDataRecognizer",
-				SupportedLanguage: "en",
-				Patterns: []PresidioPattern{
-					{
-						Name:  "health_keywords",
-						Regex: `(?i)\b(patient|diagnosed|treatment|prescription|symptoms|medical|disease|hospital|doctor|clinic)\b`,
-						Score: 0.8,
-					},
+func (c *PresidioClient) Analyze(ctx context.Context, text string, customRules []RegexRule) ([]AnalyzeResult, error) {
+	recognizers := []PresidioRecognizer{
+		{
+			Name:              "HealthDataRecognizer",
+			SupportedLanguage: "en",
+			Patterns: []PresidioPattern{
+				{
+					Name:  "health_keywords",
+					Regex: `(?i)\b(patient|diagnosed|treatment|prescription|symptoms|medical|disease|hospital|doctor|clinic)\b`,
+					Score: 0.8,
 				},
-				SupportedEntity:   "HEALTH_DATA",
 			},
-			{
-				Name:              "SsnRecognizer",
-				SupportedLanguage: "en",
-				Patterns: []PresidioPattern{
-					{
-						Name:  "ssn_pattern",
-						Regex: `\b\d{3}-\d{2}-\d{4}\b`,
-						Score: 1.0,
-					},
-				},
-				SupportedEntity:   "US_SSN",
-			},
+			SupportedEntity:   "HEALTH_DATA",
 		},
-		Entities: []string{"PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "US_SSN", "HEALTH_DATA"},
+		{
+			Name:              "SsnRecognizer",
+			SupportedLanguage: "en",
+			Patterns: []PresidioPattern{
+				{
+					Name:  "ssn_pattern",
+					Regex: `\b\d{3}-\d{2}-\d{4}\b`,
+					Score: 1.0,
+				},
+			},
+			SupportedEntity:   "US_SSN",
+		},
+	}
+
+	for _, rule := range customRules {
+		recognizers = append(recognizers, PresidioRecognizer{
+			Name:              rule.Name + "Recognizer",
+			SupportedLanguage: "en",
+			Patterns: []PresidioPattern{
+				{
+					Name:  rule.Name,
+					Regex: rule.Pattern,
+					Score: 1.0,
+				},
+			},
+			SupportedEntity: strings.ToUpper(strings.ReplaceAll(rule.Name, " ", "_")),
+		})
+	}
+
+	reqBody := AnalyzeRequest{
+		Text:             text,
+		Language:         "en",
+		AdHocRecognizers: recognizers,
+		Entities:         []string{"PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "US_SSN", "HEALTH_DATA"},
+	}
+
+	for _, rule := range customRules {
+		reqBody.Entities = append(reqBody.Entities, strings.ToUpper(strings.ReplaceAll(rule.Name, " ", "_")))
 	}
 
 	jsonBytes, err := json.Marshal(reqBody)
@@ -398,28 +419,39 @@ func GetRedactionStrategy(ctx context.Context, tenantID string) string {
 }
 
 // RedactPrompts runs Presidio Analyzer and tokenizes original prompts
-func RedactPrompts(ctx context.Context, tenantID string, prompts []string) ([]string, map[string]string, error) {
+func RedactPrompts(ctx context.Context, tenantID string, prompts []string, customRules []RegexRule) ([]string, map[string]string, error) {
 	presidio := NewPresidioClient()
 	strategy := GetRedactionStrategy(ctx, tenantID)
 	tokenMap := make(map[string]string)
 	redactedPrompts := make([]string, len(prompts))
 
 	for i, prompt := range prompts {
-		results, err := presidio.Analyze(ctx, prompt)
+		results, err := presidio.Analyze(ctx, prompt, customRules)
 		if err != nil {
 			return nil, nil, err
 		}
 
 		// Sort results descending by start index to prevent offset issues during replacements
 		sort.Slice(results, func(i, j int) bool {
+			// If starts are equal, process the longer one first (larger end)
+			if results[i].Start == results[j].Start {
+				return results[i].End > results[j].End
+			}
 			return results[i].Start > results[j].Start
 		})
 
 		runes := []rune(prompt)
+		lastProcessedStart := len(runes) + 1
+
 		for _, entity := range results {
 			if entity.Start < 0 || entity.End > len(runes) || entity.Start >= entity.End {
 				continue
 			}
+			// Skip if this entity overlaps with the previously processed (which is to the right of this one)
+			if entity.End > lastProcessedStart {
+				continue
+			}
+
 			originalVal := string(runes[entity.Start:entity.End])
 			tokenVal, err := GetOrCreateRedactionToken(ctx, tenantID, originalVal, entity.EntityType, strategy)
 			if err != nil {
@@ -429,6 +461,7 @@ func RedactPrompts(ctx context.Context, tenantID string, prompts []string) ([]st
 			
 			// Replace text segment
 			runes = append(runes[:entity.Start], append([]rune(tokenVal), runes[entity.End:]...)...)
+			lastProcessedStart = entity.Start
 		}
 		redactedPrompts[i] = string(runes)
 	}

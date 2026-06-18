@@ -1,0 +1,127 @@
+name: AuthClaw CI Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: authclaw
+          POSTGRES_USER: authclaw
+          POSTGRES_PASSWORD: authclaw
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+
+      clickhouse:
+        image: clickhouse/clickhouse-server:latest
+        env:
+          CLICKHOUSE_DB: authclaw
+          CLICKHOUSE_USER: authclaw
+          CLICKHOUSE_PASSWORD: authclaw
+        ports:
+          - 8123:8123
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Backend Dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Apply Database Migrations
+        run: |
+          cd backend
+          alembic upgrade head
+        env:
+          DATABASE_URL: postgresql://authclaw:authclaw@localhost:5432/authclaw
+
+      - name: Seed Database
+        run: |
+          cd backend
+          python -c "import test_gemini_full; test_gemini_full.seed_db()"
+        env:
+          DATABASE_URL: postgresql://authclaw:authclaw@localhost:5432/authclaw
+
+      - name: Run Backend Tests
+        run: |
+          cd backend
+          pytest --cov=app tests/
+        env:
+          DATABASE_URL: postgresql://authclaw:authclaw@localhost:5432/authclaw
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: console/package-lock.json
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd console
+          npm ci
+
+      - name: Install Playwright Browsers
+        run: |
+          cd console
+          npx playwright install --with-deps chromium
+
+      - name: Build Next.js Application
+        run: |
+          cd console
+          npm run build
+        env:
+          API_URL: http://localhost:8000
+          NEXT_PUBLIC_GATEWAY_URL: http://localhost:8080
+
+      - name: Start Services
+        run: |
+          # Start Backend
+          cd backend
+          python -m uvicorn main:app --port 8000 &
+          
+          # Start Console
+          cd ../console
+          npm run start &
+          
+          # Wait for services to be ready
+          sleep 10
+        env:
+          DATABASE_URL: postgresql://authclaw:authclaw@localhost:5432/authclaw
+          PORT: 3001
+
+      - name: Run Smoke Tests
+        run: |
+          python scripts/smoke_test.py
+
+      - name: Run Playwright E2E Tests
+        run: |
+          cd console
+          npx playwright test

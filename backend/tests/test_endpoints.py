@@ -7,8 +7,11 @@ import uuid
 from uuid import uuid4, UUID
 import os
 import base64
-
 from main import app
+
+# Force fallback to PostgreSQL audit logs by unsetting CLICKHOUSE_HOST for endpoints test suite
+os.environ.pop("CLICKHOUSE_HOST", None)
+
 from app.db.dependencies import get_db
 from app.db.models import Tenant, User, APIKey, Policy, GatewayConfig, RedactionToken, AuditLogMetadata
 from app.core.auth import hash_key

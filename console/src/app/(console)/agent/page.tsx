@@ -18,7 +18,9 @@ import {
   Lock,
   Loader2,
   Terminal,
-  Activity
+  Activity,
+  Plus,
+  MessageSquare
 } from "lucide-react";
 
 interface Workflow {
@@ -56,6 +58,11 @@ export default function AgentPage() {
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [loading, setLoading] = useState(true);
   const [triggeringScan, setTriggeringScan] = useState(false);
+
+  // Chat Sessions States
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
 
   // Chat States
   const [messages, setMessages] = useState<Message[]>([
@@ -121,15 +128,91 @@ export default function AgentPage() {
     }
   };
 
+  const fetchSessions = async (autoSelect = false) => {
+    setSessionsLoading(true);
+    try {
+      const res = await fetch("/api/agent/sessions");
+      if (!res.ok) throw new Error("Failed to load sessions");
+      const data = await res.json();
+      setSessions(data || []);
+      if (autoSelect && data && data.length > 0) {
+        setActiveSessionId(data[0].id);
+      }
+    } catch (err: any) {
+      console.warn("fetchSessions failed:", err.message);
+    } finally {
+      setSessionsLoading(false);
+    }
+  };
+
+  const fetchSessionHistory = async (sessionId: string) => {
+    setChatLoading(true);
+    try {
+      const res = await fetch(`/api/agent/sessions/${sessionId}/history`);
+      if (!res.ok) throw new Error("Failed to load message history");
+      const data = await res.json();
+      if (data && data.length > 0) {
+        setMessages(data.map((m: any) => ({
+          sender: m.sender,
+          text: m.text,
+          timestamp: new Date(m.timestamp),
+          results: m.results
+        })));
+      } else {
+        setMessages([
+          {
+            sender: "agent",
+            text: "Hello! I am your AuthClaw Compliance Agent. I orchestrate GDPR, HIPAA, and SOC 2 audits, check active gate rules, and propose infrastructure remediations. How can I assist you today?",
+            timestamp: new Date()
+          }
+        ]);
+      }
+    } catch (err: any) {
+      console.warn("fetchSessionHistory failed:", err.message);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchWorkflowsAndApprovals();
+    fetchSessions(true);
     const interval = setInterval(fetchWorkflowsAndApprovals, 5000);
     return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
+    if (activeSessionId) {
+      fetchSessionHistory(activeSessionId);
+    }
+  }, [activeSessionId]);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const handleNewChat = async () => {
+    try {
+      const res = await fetch("/api/agent/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "New Chat" }),
+      });
+      if (!res.ok) throw new Error("Failed to create chat session");
+      const newSession = await res.json();
+      setActiveSessionId(newSession.id);
+      setSessions((prev) => [newSession, ...prev]);
+      setMessages([
+        {
+          sender: "agent",
+          text: "Hello! I am your AuthClaw Compliance Agent. I orchestrate GDPR, HIPAA, and SOC 2 audits, check active gate rules, and propose infrastructure remediations. How can I assist you today?",
+          timestamp: new Date()
+        }
+      ]);
+    } catch (err: any) {
+      alert(err.message || "Error creating new chat");
+    }
+  };
 
   const triggerScan = async (framework: string) => {
     setTriggeringScan(true);
@@ -159,13 +242,33 @@ export default function AgentPage() {
     e.preventDefault();
     if (!input.trim() || chatLoading) return;
 
+    let sessionId = activeSessionId;
+
+    if (!sessionId) {
+      try {
+        const createRes = await fetch("/api/agent/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: "New Chat" }),
+        });
+        if (!createRes.ok) throw new Error("Failed to auto-create session");
+        const newSession = await createRes.json();
+        sessionId = newSession.id;
+        setActiveSessionId(newSession.id);
+        setSessions((prev) => [newSession, ...prev]);
+      } catch (err: any) {
+        alert(err.message || "Could not start new chat session");
+        return;
+      }
+    }
+
     const userText = input;
     setInput("");
     setMessages((prev) => [...prev, { sender: "user", text: userText, timestamp: new Date() }]);
     setChatLoading(true);
 
     try {
-      const res = await fetch("/api/agent/chat", {
+      const res = await fetch(`/api/agent/sessions/${sessionId}/message`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: userText }),
@@ -178,7 +281,8 @@ export default function AgentPage() {
 
       const data = await res.json();
       let responseText = data.text || "No response received.";
-      let resultsData = data.workflow || data.approval || null;
+      let resultsData = data.results || null;
+      let newTitle = data.session_title;
 
       setMessages((prev) => [
         ...prev, 
@@ -188,6 +292,12 @@ export default function AgentPage() {
       if (resultsData) {
         setSelectedResult(resultsData);
         setShowRawJson(false); // default to visual report
+      }
+
+      if (newTitle) {
+        setSessions((prev) =>
+          prev.map((s) => (s.id === sessionId ? { ...s, title: newTitle } : s))
+        );
       }
 
       await fetchWorkflowsAndApprovals();
@@ -315,62 +425,104 @@ export default function AgentPage() {
 
           {/* Chat Pane */}
           {activePane === "chat" ? (
-            <div className="flex-1 flex flex-col justify-between overflow-hidden">
-              {/* Message History */}
-              <div className="flex-1 p-6 overflow-y-auto space-y-4 max-h-[380px] min-h-[380px]">
-                {messages.map((msg, idx) => (
-                  <div 
-                    key={idx}
-                    className={`flex gap-3 max-w-[85%] ${
-                      msg.sender === "user" ? "ml-auto flex-row-reverse" : ""
-                    }`}
+            <div className="flex-1 flex overflow-hidden min-h-[440px]">
+              {/* Sessions Sidebar */}
+              <div className="w-60 border-r border-slate-800/60 bg-[#07070a]/40 flex flex-col justify-between">
+                <div className="p-3 border-b border-slate-800/40">
+                  <button
+                    onClick={handleNewChat}
+                    className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border border-indigo-500/20 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 font-bold text-xs shadow-lg transition active:scale-[0.98] cursor-pointer"
                   >
-                    <div className={`w-8 h-8 rounded-lg flex-shrink-0 flex items-center justify-center border ${
-                      msg.sender === "user" 
-                        ? "bg-indigo-650/10 border-indigo-500/20 text-indigo-400" 
-                        : "bg-slate-800/40 border-slate-700/60 text-slate-300"
-                    }`}>
-                      {msg.sender === "user" ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+                    <Plus className="w-3.5 h-3.5" />
+                    New Chat
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-2 space-y-1 max-h-[360px]">
+                  {sessionsLoading ? (
+                    <div className="flex justify-center py-6">
+                      <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
                     </div>
-
-                    <div className={`p-3.5 rounded-2xl text-xs leading-relaxed ${
-                      msg.sender === "user"
-                        ? "bg-indigo-600/10 border border-indigo-500/20 text-indigo-200 rounded-tr-none"
-                        : "bg-slate-850/40 border border-slate-800 text-slate-300 rounded-tl-none"
-                    }`}>
-                      <pre className="whitespace-pre-wrap font-sans">{msg.text}</pre>
-                      {msg.results && (
-                        <button
-                          onClick={() => setSelectedResult(msg.results)}
-                          className="mt-2 text-[10px] font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 underline transition"
-                        >
-                          View Results JSON
-                        </button>
-                      )}
+                  ) : sessions.length === 0 ? (
+                    <div className="text-center py-6 text-slate-500 text-[10px]">
+                      No active sessions.
                     </div>
-                  </div>
-                ))}
-                <div ref={messagesEndRef} />
+                  ) : (
+                    sessions.map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => setActiveSessionId(s.id)}
+                        className={`w-full flex items-center gap-2 py-1.5 px-2.5 rounded-lg text-left text-xs transition cursor-pointer ${
+                          activeSessionId === s.id
+                            ? "bg-slate-800/50 border border-slate-700/60 text-indigo-400 font-semibold"
+                            : "hover:bg-slate-850/50 text-slate-400 hover:text-slate-200 border border-transparent"
+                        }`}
+                      >
+                        <MessageSquare className="w-3.5 h-3.5 flex-shrink-0" />
+                        <span className="truncate">{s.title}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
               </div>
 
-              {/* Chat Input */}
-              <form onSubmit={handleSend} className="p-4 border-t border-slate-800/80 bg-[#07070a]/40 flex gap-2">
-                <input
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="Ask the Compliance Agent (e.g. 'Run GDPR compliance scan')..."
-                  className="flex-1 px-4 py-2.5 rounded-lg bg-[#07070a] border border-slate-800 text-slate-200 text-xs placeholder-slate-650 focus:outline-none focus:border-indigo-500/80 transition"
-                  disabled={chatLoading}
-                />
-                <button
-                  type="submit"
-                  disabled={chatLoading || !input.trim()}
-                  className="px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-lg transition disabled:opacity-50"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                </button>
-              </form>
+              {/* Chat Content */}
+              <div className="flex-1 flex flex-col justify-between overflow-hidden">
+                {/* Message History */}
+                <div className="flex-1 p-6 overflow-y-auto space-y-4 max-h-[370px]">
+                  {messages.map((msg, idx) => (
+                    <div 
+                      key={idx}
+                      className={`flex gap-3 max-w-[85%] ${
+                        msg.sender === "user" ? "ml-auto flex-row-reverse" : ""
+                      }`}
+                    >
+                      <div className={`w-8 h-8 rounded-lg flex-shrink-0 flex items-center justify-center border ${
+                        msg.sender === "user" 
+                          ? "bg-indigo-650/10 border-indigo-500/20 text-indigo-400" 
+                          : "bg-slate-800/40 border-slate-700/60 text-slate-300"
+                      }`}>
+                        {msg.sender === "user" ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+                      </div>
+
+                      <div className={`p-3.5 rounded-2xl text-xs leading-relaxed ${
+                        msg.sender === "user"
+                          ? "bg-indigo-600/10 border border-indigo-500/20 text-indigo-200 rounded-tr-none"
+                          : "bg-slate-850/40 border border-slate-800 text-slate-300 rounded-tl-none"
+                      }`}>
+                        <pre className="whitespace-pre-wrap font-sans">{msg.text}</pre>
+                        {msg.results && (
+                          <button
+                            onClick={() => setSelectedResult(msg.results)}
+                            className="mt-2 text-[10px] font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 underline transition cursor-pointer"
+                          >
+                            View Results JSON
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  <div ref={messagesEndRef} />
+                </div>
+
+                {/* Chat Input */}
+                <form onSubmit={handleSend} className="p-3 border-t border-slate-800/80 bg-[#07070a]/40 flex gap-2">
+                  <input
+                    type="text"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder={activeSessionId ? "Ask the Compliance Agent..." : "Click 'New Chat' to start a persistent session..."}
+                    className="flex-1 px-4 py-2.5 rounded-lg bg-[#07070a] border border-slate-800 text-slate-200 text-xs placeholder-slate-650 focus:outline-none focus:border-indigo-500/80 transition"
+                    disabled={chatLoading || !activeSessionId}
+                  />
+                  <button
+                    type="submit"
+                    disabled={chatLoading || !input.trim() || !activeSessionId}
+                    className="px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-lg transition disabled:opacity-50 cursor-pointer"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                  </button>
+                </form>
+              </div>
             </div>
           ) : (
             /* Scans Telemetry Pane */

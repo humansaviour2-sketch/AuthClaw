@@ -13,7 +13,12 @@ import {
   SlidersHorizontal,
   Calendar,
   AlertTriangle,
-  FileDown
+  FileDown,
+  X,
+  Copy,
+  Check,
+  ShieldCheck,
+  ShieldAlert
 } from "lucide-react";
 
 interface AuditRecord {
@@ -22,13 +27,18 @@ interface AuditRecord {
   actor_id: string;
   actor_type: string;
   action: string;
-  provider: string;
-  model: string;
-  reason: string;
-  response_status: number;
-  duration_ms: number;
-  frameworks_affected: string[];
+  provider?: string;
+  model?: string;
+  reason?: string;
+  response_status?: number;
+  duration_ms?: number;
+  frameworks_affected?: string[];
   chain_valid?: boolean;
+  request_id?: string;
+  prior_hash?: string;
+  integrity_hash?: string;
+  execution_trace?: any;
+  [key: string]: any;
 }
 
 export default function AuditPage() {
@@ -36,6 +46,16 @@ export default function AuditPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Inspector Panel State
+  const [selectedRecord, setSelectedRecord] = useState<AuditRecord | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  const handleCopy = (text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
 
   // Filters
   const [actionFilter, setActionFilter] = useState("");
@@ -299,7 +319,11 @@ export default function AuditPage() {
                 {filteredRecords.map((log) => {
                   const isBlock = log.action.toLowerCase() === "block";
                   return (
-                    <tr key={log.record_id} className="hover:bg-slate-800/10 transition-colors">
+                    <tr 
+                      key={log.record_id} 
+                      onClick={() => setSelectedRecord(log)}
+                      className="hover:bg-slate-800/30 transition-colors cursor-pointer"
+                    >
                       <td className="px-6 py-4 font-mono text-slate-450">
                         {new Date(log.timestamp).toLocaleString()}
                       </td>
@@ -389,6 +413,287 @@ export default function AuditPage() {
           </div>
         </div>
       </div>
+
+      {/* Slide-out Event Inspector Panel */}
+      {selectedRecord && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          {/* Backdrop */}
+          <div 
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity" 
+            onClick={() => setSelectedRecord(null)} 
+          />
+          
+          {/* Panel Container */}
+          <div className="relative w-full max-w-lg md:max-w-xl bg-[#09090d] border-l border-slate-800 shadow-2xl p-6 flex flex-col h-full overflow-y-auto text-xs text-slate-300">
+            {/* Header */}
+            <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                  <ScrollText className="w-4 h-4 text-indigo-400" />
+                  Event Inspector
+                </h3>
+                <p className="text-[10px] text-slate-550 mt-0.5 font-medium">
+                  Telemetry and cryptographic integrity validation.
+                </p>
+              </div>
+              <button 
+                onClick={() => setSelectedRecord(null)}
+                className="p-1 rounded-lg hover:bg-slate-800 text-slate-455 hover:text-white transition cursor-pointer"
+              >
+                <X className="w-4.5 h-4.5" />
+              </button>
+            </div>
+
+            {/* Cryptographic Badge */}
+            <div className="p-4 rounded-xl border border-slate-800 bg-[#0c0c12]/40 mb-6 flex items-center justify-between">
+              <div>
+                <span className="text-[9px] font-black uppercase text-slate-550 block tracking-wider mb-1">
+                  CRYPTOGRAPHIC INTEGRITY STATUS
+                </span>
+                {integrityCheck ? (
+                  selectedRecord.chain_valid ? (
+                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-0.5 rounded-full">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      Chain Valid & Verified
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-red-400 bg-red-500/10 border border-red-500/25 px-2.5 py-0.5 rounded-full animate-pulse">
+                      <ShieldAlert className="w-3.5 h-3.5" />
+                      Verification Failed (Tampered)
+                    </span>
+                  )
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-550 bg-slate-800 border border-slate-700 px-2.5 py-0.5 rounded-full">
+                    Verification Skipped
+                  </span>
+                )}
+              </div>
+              <span className="text-[10px] font-bold text-slate-550 uppercase px-2 py-0.5 rounded bg-slate-900 border border-slate-850">
+                Source: {selectedRecord.provider ? "LLM Proxy" : "System Audit"}
+              </span>
+            </div>
+
+            {/* Telemetry and Details */}
+            <div className="space-y-5">
+              {/* Event Metadata */}
+              <div>
+                <h4 className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 mb-2.5">
+                  Event Metadata
+                </h4>
+                <div className="grid grid-cols-2 gap-3.5 p-4 rounded-xl border border-slate-800 bg-[#07070a] text-[11px]">
+                  <div>
+                    <span className="text-slate-550 text-[9px] font-black uppercase">RECORD ID</span>
+                    <div className="flex items-center gap-1 mt-0.5 font-mono text-[10px] text-slate-300">
+                      <span>{selectedRecord.record_id}</span>
+                      <button 
+                        onClick={() => handleCopy(selectedRecord.record_id, 'record_id')}
+                        className="p-0.5 text-slate-550 hover:text-white transition cursor-pointer"
+                      >
+                        {copiedField === 'record_id' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-slate-550 text-[9px] font-black uppercase">REQUEST CORRELATION ID</span>
+                    <p className="font-mono text-[10px] text-slate-350 mt-0.5">
+                      {selectedRecord.request_id || "N/A"}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-slate-550 text-[9px] font-black uppercase">TIMESTAMP</span>
+                    <p className="text-slate-300 mt-0.5 font-mono">
+                      {new Date(selectedRecord.timestamp).toLocaleString()}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-slate-550 text-[9px] font-black uppercase">ACTION</span>
+                    <p className="mt-0.5 font-semibold">
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                        selectedRecord.action.toLowerCase() === 'block' 
+                          ? 'bg-red-500/10 border border-red-500/20 text-red-400' 
+                          : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                      }`}>
+                        {selectedRecord.action.toUpperCase()}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actor Details */}
+              <div>
+                <h4 className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 mb-2.5">
+                  Actor Details
+                </h4>
+                <div className="grid grid-cols-2 gap-3.5 p-4 rounded-xl border border-slate-800 bg-[#07070a] text-[11px]">
+                  <div>
+                    <span className="text-slate-550 text-[9px] font-black uppercase">ACTOR ID</span>
+                    <p className="font-mono text-[10px] text-slate-300 mt-0.5 truncate select-all" title={selectedRecord.actor_id}>
+                      {selectedRecord.actor_id || "System"}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-slate-550 text-[9px] font-black uppercase">ACTOR TYPE</span>
+                    <p className="text-slate-350 mt-0.5 capitalize font-semibold">
+                      {selectedRecord.actor_type || "N/A"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* API Interception Details */}
+              {selectedRecord.provider && (
+                <div>
+                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 mb-2.5">
+                    API Telemetry
+                  </h4>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 p-4 rounded-xl border border-slate-800 bg-[#07070a] text-[11px]">
+                    <div>
+                      <span className="text-slate-550 text-[9px] font-black uppercase">PROVIDER</span>
+                      <p className="font-semibold text-slate-300 capitalize mt-0.5">
+                        {selectedRecord.provider}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-slate-550 text-[9px] font-black uppercase">MODEL</span>
+                      <p className="font-mono text-[10px] text-slate-400 mt-0.5">
+                        {selectedRecord.model}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-slate-550 text-[9px] font-black uppercase">STATUS CODE</span>
+                      <p className="font-semibold text-slate-300 mt-0.5">
+                        {selectedRecord.response_status || "N/A"}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-slate-550 text-[9px] font-black uppercase">DURATION</span>
+                      <p className="font-semibold text-slate-300 mt-0.5">
+                        {selectedRecord.duration_ms !== undefined ? `${selectedRecord.duration_ms} ms` : "N/A"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Cryptographic Chain Details */}
+              <div>
+                <h4 className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 mb-2.5">
+                  Cryptographic Chain Hashes
+                </h4>
+                <div className="space-y-3.5 p-4 rounded-xl border border-slate-800 bg-[#07070a] text-[10px] font-mono">
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-slate-550 text-[9px] font-black uppercase font-sans">PRIOR HASH</span>
+                      <button 
+                        onClick={() => handleCopy(selectedRecord.prior_hash || '', 'prior_hash')}
+                        className="p-0.5 text-slate-550 hover:text-white transition flex items-center gap-1 cursor-pointer font-sans text-[8px] font-bold"
+                      >
+                        {copiedField === 'prior_hash' ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5" />}
+                        Copy
+                      </button>
+                    </div>
+                    <div className="p-2 bg-slate-900/50 rounded border border-slate-850/60 text-slate-400 break-all select-all">
+                      {selectedRecord.prior_hash || "GENESIS"}
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-slate-550 text-[9px] font-black uppercase font-sans">INTEGRITY HASH</span>
+                      <button 
+                        onClick={() => handleCopy(selectedRecord.integrity_hash || '', 'integrity_hash')}
+                        className="p-0.5 text-slate-550 hover:text-white transition flex items-center gap-1 cursor-pointer font-sans text-[8px] font-bold"
+                      >
+                        {copiedField === 'integrity_hash' ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5" />}
+                        Copy
+                      </button>
+                    </div>
+                    <div className="p-2 bg-slate-900/50 rounded border border-slate-850/60 text-slate-400 break-all select-all">
+                      {selectedRecord.integrity_hash || "N/A"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Execution Trace */}
+              {selectedRecord.execution_trace && selectedRecord.execution_trace !== "[]" && (
+                <div>
+                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 mb-2.5">
+                    Execution Trace
+                  </h4>
+                  <div className="p-4 rounded-xl border border-slate-800 bg-[#07070a] space-y-2 max-h-[180px] overflow-y-auto">
+                    {(() => {
+                      try {
+                        const parsed = typeof selectedRecord.execution_trace === 'string' 
+                          ? JSON.parse(selectedRecord.execution_trace) 
+                          : selectedRecord.execution_trace;
+                        if (Array.isArray(parsed)) {
+                          return parsed.map((step: any, idx: number) => (
+                            <div key={idx} className="flex gap-2 items-start py-1 text-[11px] leading-relaxed border-b border-slate-850/40 last:border-b-0 pb-1.5 last:pb-0">
+                              <span className="w-4.5 h-4.5 rounded bg-indigo-500/10 text-indigo-400 flex items-center justify-center font-bold text-[9px] flex-shrink-0">
+                                {idx + 1}
+                              </span>
+                              <span className="font-mono text-slate-350">{typeof step === 'object' ? JSON.stringify(step) : String(step)}</span>
+                            </div>
+                          ));
+                        }
+                        return <pre className="font-mono text-slate-400 break-all">{String(selectedRecord.execution_trace)}</pre>;
+                      } catch {
+                        return <pre className="font-mono text-slate-400 break-all">{String(selectedRecord.execution_trace)}</pre>;
+                      }
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {/* Custom Attributes (Supporting future/arbitrary event types) */}
+              {(() => {
+                const STANDARD_FIELDS = new Set([
+                  "record_id", "request_id", "timestamp", "action", "actor_id", "actor_type",
+                  "provider", "model", "response_status", "duration_ms", "prior_hash", 
+                  "integrity_hash", "execution_trace", "chain_valid", "frameworks_affected"
+                ]);
+                const customKeys = Object.keys(selectedRecord).filter(key => !STANDARD_FIELDS.has(key));
+                if (customKeys.length === 0) return null;
+                return (
+                  <div>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 mb-2.5">
+                      Custom Attributes
+                    </h4>
+                    <div className="grid grid-cols-2 gap-3.5 p-4 rounded-xl border border-slate-800 bg-[#07070a] text-[11px]">
+                      {customKeys.map(key => (
+                        <div key={key} className="overflow-hidden">
+                          <span className="text-slate-550 text-[9px] font-black uppercase block truncate" title={key}>
+                            {key}
+                          </span>
+                          <span className="font-mono text-[10px] text-slate-350 mt-0.5 break-all block">
+                            {typeof selectedRecord[key] === 'object' 
+                              ? JSON.stringify(selectedRecord[key]) 
+                              : String(selectedRecord[key])}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Raw JSON Viewer */}
+              <div>
+                <h4 className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 mb-2.5">
+                  Raw Event JSON
+                </h4>
+                <div className="p-4 rounded-xl border border-slate-800 bg-[#07070a] overflow-x-auto max-h-[280px]">
+                  <pre className="font-mono text-[10px] text-slate-400 select-all leading-normal">
+                    {JSON.stringify(selectedRecord, null, 2)}
+                  </pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

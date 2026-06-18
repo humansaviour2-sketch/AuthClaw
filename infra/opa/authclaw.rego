@@ -42,14 +42,7 @@ deny_reasons[msg] if {
 	msg := sprintf("Model '%s' is not in whitelist", [input.model])
 }
 
-# 4. Regex-based blocking
-deny_reasons[msg] if {
-	policy := input.policy
-	rule := policy.regex_rules[_]
-	prompt := input.prompts[_]
-	regex.match(rule.pattern, prompt)
-	msg := sprintf("Regex block: %s", [rule.reason])
-}
+# 4. Regex-based Redaction is now handled natively by the Gateway before OPA evaluation.
 
 # 5. Topic classification blocking
 deny_reasons[msg] if {
@@ -59,4 +52,4 @@ deny_reasons[msg] if {
 	rule.topic == topic
 	not in_array(rule.allowed_models, input.model)
 	msg := sprintf("Topic block: %s", [rule.reason])
-}
+}

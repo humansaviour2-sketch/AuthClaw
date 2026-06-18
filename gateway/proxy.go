@@ -137,13 +137,20 @@ func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		copy(originalPrompts, normalized.Prompts)
 	}
 
+	// Load Policy early for Redaction
+	config, policyID, _ := LoadPolicyWithCache(r.Context(), tenantID)
+	var customRules []RegexRule
+	if config != nil {
+		customRules = config.RegexRules
+	}
+
 	// Inbound Prompt Redaction
 	var tokenMap map[string]string
 	if provider == "openai" || provider == "anthropic" || provider == "gemini" {
 		if normalized != nil && len(normalized.Prompts) > 0 {
 			var redactErr error
 			var redactedPrompts []string
-			redactedPrompts, tokenMap, redactErr = RedactPrompts(r.Context(), tenantID, normalized.Prompts)
+			redactedPrompts, tokenMap, redactErr = RedactPrompts(r.Context(), tenantID, normalized.Prompts, customRules)
 			if redactErr == nil {
 				log.Printf("[DEBUG] ORIGINAL PROMPT: %v", normalized.Prompts)
 				log.Printf("[DEBUG] REDACTED PROMPT: %v", redactedPrompts)
@@ -171,7 +178,6 @@ func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	route := r.URL.Path
-	var policyID string
 	allow, reason, polID, evalErr := EvaluatePolicy(r.Context(), tenantID, model, route, originalPrompts, topics)
 	policyID = polID
 	if evalErr != nil {
@@ -224,6 +230,9 @@ func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			geminiKey := os.Getenv("GEMINI_API_KEY")
 			if geminiKey != "" {
 				req.Header.Set("x-goog-api-key", geminiKey)
+				q := req.URL.Query()
+				q.Set("key", geminiKey)
+				req.URL.RawQuery = q.Encode()
 			}
 		}
 	}

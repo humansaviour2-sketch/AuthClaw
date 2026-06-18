@@ -39,6 +39,7 @@ type ModelRules struct {
 }
 
 type RegexRule struct {
+	Name    string `yaml:"name" json:"name"`
 	Pattern string `yaml:"pattern" json:"pattern"`
 	Reason  string `yaml:"reason" json:"reason"`
 }

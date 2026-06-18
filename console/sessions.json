@@ -142,5 +142,77 @@
     ],
     "sessionId": "397ce88f-5960-4c50-9a9d-4db95536be9d",
     "createdAt": 1781680618835
+  },
+  "fce87b11-e588-4011-be77-990894837645": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "fce87b11-e588-4011-be77-990894837645",
+    "createdAt": 1781693307683
+  },
+  "ab5288b6-ca76-4669-b3ce-4e7e0546b465": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "ab5288b6-ca76-4669-b3ce-4e7e0546b465",
+    "createdAt": 1781693338315
+  },
+  "c1729097-b4b9-4e47-9d10-b75a059ef1a2": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "c1729097-b4b9-4e47-9d10-b75a059ef1a2",
+    "createdAt": 1781693372475
+  },
+  "90d3c9fc-d541-4122-9fda-9b413d159a3c": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "90d3c9fc-d541-4122-9fda-9b413d159a3c",
+    "createdAt": 1781694216599
+  },
+  "8867443b-0f89-433d-8828-39af3af0885d": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "8867443b-0f89-433d-8828-39af3af0885d",
+    "createdAt": 1781694241242
+  },
+  "73a6ca7d-1074-4150-9460-3ca93a5b1870": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "73a6ca7d-1074-4150-9460-3ca93a5b1870",
+    "createdAt": 1781767605873
   }
 }

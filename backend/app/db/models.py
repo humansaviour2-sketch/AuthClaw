@@ -29,6 +29,7 @@ class Tenant(Base):
     gateways = relationship("GatewayConfig", back_populates="tenant", cascade="all, delete-orphan")
     redaction_tokens = relationship("RedactionToken", back_populates="tenant", cascade="all, delete-orphan")
     workflows = relationship("ComplianceWorkflow", back_populates="tenant", cascade="all, delete-orphan")
+    chat_sessions = relationship("ChatSession", back_populates="tenant", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_tenant_status", "status"),
@@ -268,3 +269,41 @@ class ComplianceWorkflow(Base):
         Index("idx_workflow_state", "current_state"),
         Index("idx_workflow_wfid", "workflow_id"),
     )
+
+
+class ChatSession(Base):
+    """Compliance agent chat sessions"""
+    __tablename__ = "chat_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    title = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    # Relationships
+    tenant = relationship("Tenant", back_populates="chat_sessions")
+    messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_chatsession_tenant", "tenant_id"),
+    )
+
+
+class ChatMessage(Base):
+    """Messages in a compliance agent chat session"""
+    __tablename__ = "chat_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("chat_sessions.id"), nullable=False)
+    sender = Column(Enum("user", "agent", name="chat_sender"), nullable=False)
+    text = Column(Text, nullable=False)
+    results = Column(JSON, nullable=True)
+    timestamp = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    # Relationships
+    session = relationship("ChatSession", back_populates="messages")
+
+    __table_args__ = (
+        Index("idx_chatmessage_session", "session_id"),
+    )
+
