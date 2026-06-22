@@ -1,0 +1,120 @@
+package main
+
+import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestPayloadFidelityContractOpenAI(t *testing.T) {
+	expectedResponse := `{"id":"chatcmpl-123","object":"chat.completion","created":1677858242,"model":"gpt-4","choices":[{"index":0,"message":{"role":"assistant","content":"Hello!"},"finish_reason":"stop"}]}`
+	
+	openaiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		expectedRequest := `{"model":"gpt-4","messages":[{"role":"user","content":"Hi"}]}`
+		if strings.TrimSpace(string(bodyBytes)) != expectedRequest {
+			t.Errorf("Request body corrupted. Expected: %s, Got: %s", expectedRequest, string(bodyBytes))
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(expectedResponse))
+	}))
+	defer openaiServer.Close()
+
+	proxy := NewProxyServer()
+	proxy.OpenAIBaseURL = openaiServer.URL
+
+	requestBody := `{"model":"gpt-4","messages":[{"role":"user","content":"Hi"}]}`
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(requestBody))
+	w := httptest.NewRecorder()
+
+	proxy.ServeHTTP(w, req)
+
+	resp := w.Result()
+	responseBodyBytes, _ := io.ReadAll(resp.Body)
+	if string(responseBodyBytes) != expectedResponse {
+		t.Errorf("Response body corrupted. Expected: %s, Got: %s", expectedResponse, string(responseBodyBytes))
+	}
+}
+
+func TestPayloadFidelityContractAnthropic(t *testing.T) {
+	expectedResponse := `{"id":"msg_123","type":"message","role":"assistant","content":[{"type":"text","text":"Hello!"}],"model":"claude-3-opus"}`
+	
+	anthropicServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		expectedRequest := `{"model":"claude-3-opus","messages":[{"role":"user","content":"Hi"}]}`
+		if strings.TrimSpace(string(bodyBytes)) != expectedRequest {
+			t.Errorf("Request body corrupted. Expected: %s, Got: %s", expectedRequest, string(bodyBytes))
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(expectedResponse))
+	}))
+	defer anthropicServer.Close()
+
+	proxy := NewProxyServer()
+	proxy.AnthropicBaseURL = anthropicServer.URL
+
+	requestBody := `{"model":"claude-3-opus","messages":[{"role":"user","content":"Hi"}]}`
+	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(requestBody))
+	w := httptest.NewRecorder()
+
+	proxy.ServeHTTP(w, req)
+
+	resp := w.Result()
+	responseBodyBytes, _ := io.ReadAll(resp.Body)
+	if string(responseBodyBytes) != expectedResponse {
+		t.Errorf("Response body corrupted. Expected: %s, Got: %s", expectedResponse, string(responseBodyBytes))
+	}
+}
+
+func TestPayloadFidelityContractGemini(t *testing.T) {
+	expectedResponse := `{"candidates":[{"content":{"parts":[{"text":"Hello!"}],"role":"model"}}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":2,"totalTokenCount":4}}`
+	expectedKey := "test-gemini-api-key-999"
+	t.Setenv("GEMINI_API_KEY", expectedKey)
+
+	geminiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify API Key header
+		key := r.Header.Get("x-goog-api-key")
+		if key != expectedKey {
+			t.Errorf("Expected x-goog-api-key header %s, Got: %s", expectedKey, key)
+		}
+
+		// Verify Authorization header is deleted
+		auth := r.Header.Get("Authorization")
+		if auth != "" {
+			t.Errorf("Expected Authorization header to be deleted, but got: %s", auth)
+		}
+
+		bodyBytes, _ := io.ReadAll(r.Body)
+		expectedRequest := `{"contents":[{"parts":[{"text":"Hi"}]}]}`
+		if strings.TrimSpace(string(bodyBytes)) != expectedRequest {
+			t.Errorf("Request body corrupted. Expected: %s, Got: %s", expectedRequest, string(bodyBytes))
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(expectedResponse))
+	}))
+	defer geminiServer.Close()
+
+	proxy := NewProxyServer()
+	proxy.GeminiBaseURL = geminiServer.URL
+
+	requestBody := `{"contents":[{"parts":[{"text":"Hi"}]}]}`
+	req := httptest.NewRequest("POST", "/v1/models/gemini-1.5-flash:generateContent", strings.NewReader(requestBody))
+	req.Header.Set("Authorization", "Bearer some-gateway-key")
+	w := httptest.NewRecorder()
+
+	proxy.ServeHTTP(w, req)
+
+	resp := w.Result()
+	responseBodyBytes, _ := io.ReadAll(resp.Body)
+	if string(responseBodyBytes) != expectedResponse {
+		t.Errorf("Response body corrupted. Expected: %s, Got: %s", expectedResponse, string(responseBodyBytes))
+	}
+}

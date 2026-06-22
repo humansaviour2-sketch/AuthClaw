@@ -1,0 +1,85 @@
+package main
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"net/http"
+	"strings"
+
+	"github.com/lib/pq"
+)
+
+type contextKey string
+
+const (
+	TenantIDContextKey  contextKey = "tenant_id"
+	ScopesContextKey    contextKey = "scopes"
+	RequestIDContextKey contextKey = "request_id"
+)
+
+// generateRequestID creates a random 16-byte hex request identifier.
+func generateRequestID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "unknown"
+	}
+	return hex.EncodeToString(b)
+}
+
+// HashKey computes the SHA-256 hash of the API key
+func HashKey(key string) string {
+	h := sha256.New()
+	h.Write([]byte(key))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// AuthMiddleware extracts the API key, validates it, and injects tenant info into context
+func AuthMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 1. Extract Authorization header
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			http.Error(w, "Missing Authorization header", http.StatusUnauthorized)
+			return
+		}
+
+		parts := strings.Split(authHeader, " ")
+		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+			http.Error(w, "Invalid Authorization format. Expected: Bearer <key>", http.StatusUnauthorized)
+			return
+		}
+
+		apiKey := parts[1]
+		keyHash := HashKey(apiKey)
+
+		// 2. Query DB to validate key and retrieve tenant_id
+		var tenantID string
+		var scopes []string
+
+		err := DB.QueryRow(
+			"SELECT tenant_id, scopes FROM resolve_api_key($1)",
+			keyHash,
+		).Scan(&tenantID, pq.Array(&scopes))
+
+		if err != nil {
+			http.Error(w, "Unauthorized: Invalid or expired API Key", http.StatusUnauthorized)
+			return
+		}
+
+		// 3. Inject tenant info and request_id into context
+		// Honour an upstream X-Request-ID header; generate one if absent.
+		requestID := r.Header.Get("X-Request-ID")
+		if requestID == "" {
+			requestID = generateRequestID()
+		}
+		w.Header().Set("X-Request-ID", requestID)
+
+		ctx := context.WithValue(r.Context(), TenantIDContextKey, tenantID)
+		ctx = context.WithValue(ctx, ScopesContextKey, scopes)
+		ctx = context.WithValue(ctx, RequestIDContextKey, requestID)
+
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}

@@ -1,0 +1,198 @@
+Recommended Order
+Phase 16 — Evidence Repository
+
+Keep exactly where it is.
+
+This becomes the source of truth.
+
+Everything later depends on it.
+
+Without evidence storage:
+
+Reports are weak
+RAG is weak
+Findings history is weak
+
+Good choice.
+
+Phase 17 — Findings Dashboard
+
+Keep.
+
+Evidence + Findings = actual compliance product.
+
+Think:
+
+Open findings
+Severity
+Framework mapping
+Trend analysis
+
+This is where AuthClaw starts looking like Vanta/Securiti.
+
+Move Authentication Earlier
+Phase 18 — Real Authentication
+
+Move from 20 → 18.
+
+Need:
+
+Login
+Sessions
+Password reset
+
+Immediately.
+
+Without auth you're still effectively operating a dev platform.
+
+Phase 19 — RBAC
+
+Move from 22 → 19.
+
+Roles:
+
+Admin
+Auditor
+Reviewer
+Analyst
+Read Only
+
+Enterprise buyers expect this.
+
+Phase 20 — MFA
+
+Move from 21 → 20.
+
+Because:
+
+Approvals + Remediation should already be MFA-protected.
+
+Your own HITL design already assumes MFA-backed approval.
+
+Phase 21 — SSO
+
+Move from 24 → 21.
+
+This is often a deal-breaker.
+
+Many enterprises won't even trial a product without:
+
+Azure AD
+Okta
+Google Workspace
+Phase 22 — Scheduled Scans
+
+Now add automation.
+
+By this point:
+
+Users exist
+Roles exist
+SSO exists
+
+Now recurring scans make sense.
+
+Phase 23 — Reports
+
+Reports after Evidence + Findings.
+
+Now reports are actually useful because they can pull:
+
+Evidence
+Findings
+Trends
+Scores
+Phase 24 — Notifications
+
+Move slightly later.
+
+Notifications depend on:
+
+Findings
+Reports
+Scheduled jobs
+
+Otherwise you'll keep rewriting them.
+
+Phase 25 — Multi-Tenant Hardening
+
+Do before enterprise rollout.
+
+Includes:
+
+Quotas
+Tenant settings
+Isolation validation
+Usage controls
+Phase 26 — Safe Remediation
+
+Good placement.
+
+This is where you move from:
+
+"I found a problem"
+
+to
+
+"I can fix the problem."
+
+Major product milestone.
+
+Phase 27 — Bedrock Integration
+
+Good placement.
+
+Do not let Bedrock drive compliance logic.
+
+Use it for:
+
+Summaries
+Explanations
+Reports
+Remediation recommendations
+
+Exactly as you've planned.
+
+Phase 28 — RAG Layer
+
+One adjustment:
+
+I would start collecting embeddings much earlier (around Phase 16).
+
+Don't expose RAG until Phase 28.
+
+Store embeddings continuously from:
+
+Evidence
+Findings
+Policies
+Audit logs
+
+Then Phase 28 becomes mostly UI + retrieval.
+
+Phase 29 — Automated Remediation
+
+Correct placement.
+
+Only after:
+
+HITL
+MFA
+Audit
+Safe remediation
+
+are battle-tested.
+
+Phase 30 — Enterprise Governance Suite
+
+Good final vision.
+
+This becomes:
+
+Compliance
+Risk
+Governance
+AI Governance
+Multi-cloud posture management
+
+all under one platform.

@@ -1,0 +1,242 @@
+{
+  "57a9dfba-fdf3-444a-901b-fd3dfa7dd34b": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "57a9dfba-fdf3-444a-901b-fd3dfa7dd34b",
+    "createdAt": 1781613048486
+  },
+  "59291f58-3c7a-4373-9d45-4022dd002d43": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "59291f58-3c7a-4373-9d45-4022dd002d43",
+    "createdAt": 1781613942826
+  },
+  "16f180da-f93a-4799-a7a1-3dce3f63f753": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "16f180da-f93a-4799-a7a1-3dce3f63f753",
+    "createdAt": 1781676134735
+  },
+  "0ce5aaf7-c5c0-4e2b-9afc-ed12783cfdd5": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "0ce5aaf7-c5c0-4e2b-9afc-ed12783cfdd5",
+    "createdAt": 1781676176053
+  },
+  "a4ee8e80-c251-4550-83c3-c727f89476d2": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "a4ee8e80-c251-4550-83c3-c727f89476d2",
+    "createdAt": 1781676263944
+  },
+  "33589d82-62e5-4293-a71b-8eb54dc032ca": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "33589d82-62e5-4293-a71b-8eb54dc032ca",
+    "createdAt": 1781676278639
+  },
+  "b97311a8-7ca0-46c0-9fb5-16025748c7cb": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "b97311a8-7ca0-46c0-9fb5-16025748c7cb",
+    "createdAt": 1781676295747
+  },
+  "3c48b29c-c3a8-4355-8369-3c93855a1c7d": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "3c48b29c-c3a8-4355-8369-3c93855a1c7d",
+    "createdAt": 1781676405576
+  },
+  "389bcb41-1da6-4768-b776-4e6e42df394d": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "389bcb41-1da6-4768-b776-4e6e42df394d",
+    "createdAt": 1781680157418
+  },
+  "e25ee1ee-86bf-401e-b77c-6b58dc8239fd": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "e25ee1ee-86bf-401e-b77c-6b58dc8239fd",
+    "createdAt": 1781680212728
+  },
+  "1434f28d-0e9c-4b3e-b50c-5e6b6624f408": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "1434f28d-0e9c-4b3e-b50c-5e6b6624f408",
+    "createdAt": 1781680552852
+  },
+  "397ce88f-5960-4c50-9a9d-4db95536be9d": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "397ce88f-5960-4c50-9a9d-4db95536be9d",
+    "createdAt": 1781680618835
+  },
+  "fce87b11-e588-4011-be77-990894837645": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "fce87b11-e588-4011-be77-990894837645",
+    "createdAt": 1781693307683
+  },
+  "ab5288b6-ca76-4669-b3ce-4e7e0546b465": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "ab5288b6-ca76-4669-b3ce-4e7e0546b465",
+    "createdAt": 1781693338315
+  },
+  "c1729097-b4b9-4e47-9d10-b75a059ef1a2": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "c1729097-b4b9-4e47-9d10-b75a059ef1a2",
+    "createdAt": 1781693372475
+  },
+  "90d3c9fc-d541-4122-9fda-9b413d159a3c": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "90d3c9fc-d541-4122-9fda-9b413d159a3c",
+    "createdAt": 1781694216599
+  },
+  "8867443b-0f89-433d-8828-39af3af0885d": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "8867443b-0f89-433d-8828-39af3af0885d",
+    "createdAt": 1781694241242
+  },
+  "be1c2ea5-2b20-4c9c-a7da-09b70084b592": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "be1c2ea5-2b20-4c9c-a7da-09b70084b592",
+    "createdAt": 1781845060365
+  },
+  "374babbb-2834-4d98-9ff9-bfbe05b802b1": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "a0eebc99-0000-0000-0000-bb6d6bb9bd33",
+    "tenantId": "a0eebc99-0000-0000-0000-bb6d6bb9bd11",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "374babbb-2834-4d98-9ff9-bfbe05b802b1",
+    "createdAt": 1781937213743
+  },
+  "e6ead335-41ca-4e0b-b300-aac1675eecaf": {
+    "apiKey": "manual_verif_key_123",
+    "userId": "fb7845ed-642e-4a00-a922-a8e566da08fb",
+    "tenantId": "7e3597c8-443a-469e-afa9-41aec3005054",
+    "scopes": [
+      "admin",
+      "read",
+      "write"
+    ],
+    "sessionId": "e6ead335-41ca-4e0b-b300-aac1675eecaf",
+    "createdAt": 1781944229946
+  }
+}
